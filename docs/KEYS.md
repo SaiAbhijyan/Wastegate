@@ -8,6 +8,7 @@ Written 2026-09-24. Keys live in env vars only. They never go in config files, l
 - Use them only for **escalation and verification**, and only after a **free live smoke works**.
 - The $20 chat plans are for Claude Code Desktop, not for Wastegate.
 - Paid keys are ignored even if set, unless you pass `wg ask --live --allow-paid` or set `ALLOW_PAID=1`.
+- `--allow-paid` and `ALLOW_PAID=1` unlock **all** paid rows at once (Anthropic, OpenAI, and non-`:free` OpenRouter). There is no per-provider paid switch.
 
 | provider | env var | wired | billing class |
 |---|---|---|---|

@@ -38,13 +38,16 @@ def live_catalog(catalog: Catalog, allow_paid: bool = False) -> Catalog:
     return sub
 
 
-def live_providers(catalog: Catalog, allow_network: bool, transport=None):
-    """Factory(role, model_id) -> adapter, checked at resolve time (before any repo write).
+def live_providers(catalog: Catalog, allow_network: bool, transport=None, allow_paid: bool = False):
+    """Factory(role, model_id) -> adapter, checked at resolve time (before any repo write or HTTP).
+    Paid gate is enforced here too, so an unfiltered catalog cannot reach a paid model.
     transport: test-only fake; None = real HTTP."""
     def get(role: str, model_id: str):
         m = next((m for m in catalog.models if m.id == model_id), None)
         if m is None or m.provider not in ADAPTERS:
             raise LiveDisabled(f"no live adapter for model {model_id!r}")
+        if is_paid(m) and not paid_allowed(allow_paid):
+            raise LiveDisabled(f"paid model {model_id!r} refused; set ALLOW_PAID=1 or pass --allow-paid")
         a = ADAPTERS[m.provider](allow_network=allow_network, transport=transport)
         a.check()
         return a

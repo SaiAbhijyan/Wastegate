@@ -16,7 +16,7 @@ from rich.table import Table
 from . import config as cfgmod
 from .catalog import load_catalog, mock_catalog
 from .compose import compose
-from .log import TurnLogger
+from .log import TurnLogger, redact
 from .pipeline import UnsafeEdit, run_ask
 from .providers.base import LiveDisabled
 from .providers.live import live_catalog, live_providers
@@ -200,7 +200,7 @@ def ask(text: str,
         out.print(f"live: {e}")
         raise typer.Exit(2)
     providers = {"dry-run": None, "mock": mock_providers(replies) if replies else None,
-                 "live": live_providers(catalog, allow_network=True)}[mode]
+                 "live": live_providers(catalog, allow_network=True, allow_paid=allow_paid)}[mode]
     try:
         res = run_ask(text, repo, BACKENDS[name](), catalog, cfgmod.router_config(cfg), load_builtin(),
                       mode=mode, providers=providers)
@@ -215,7 +215,7 @@ def ask(text: str,
         raise typer.Exit(1)
     TurnLogger(Path(".wastegate/logs")).write(res.record)
     for line in res.transcript:
-        out.print(line, markup=False)
+        out.print(redact(line), markup=False)  # model-written findings may echo secrets
     if mode == "live":
         p = write_smoke_report(res.record, Path("results"), datetime.now(timezone.utc).strftime("%Y%m%d"))
         out.print(f"smoke report: {p}")
