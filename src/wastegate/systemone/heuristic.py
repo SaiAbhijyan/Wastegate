@@ -1,3 +1,4 @@
+# FROZEN after session 1. Cue edits need a new labels set from a human who has not read this file.
 """Keyword-rule System One. DEV / OFFLINE CI ONLY.
 
 Cues come from the rubric in evals/route_quality/labels.md, not from a fitted model.
