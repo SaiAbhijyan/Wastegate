@@ -11,7 +11,7 @@
 | `wg skills add owner/repo` / `rm` | 1.1 | not implemented (clone → pin SHA → scan → quarantine) |
 | `wg models` | 1 | catalog by tier, with the `verified` flag |
 | `wg eval run --suite route_quality` | 3 | session 1: dry-prints the frozen label file + sha256 only |
-| `wg ask "…" --dry-run` / `--mock --replies DIR [--repo P]` | 2a | implemented (no network); no mode → exit 2. See docs/PHASE2.md |
+| `wg ask "…" --dry-run` / `--mock --replies DIR` / `--live` `[--repo P]` | 2a / 2b-prep | dry-run + mock implemented (no network); `--live` exits 2 without a key; no mode → exit 2. See docs/PHASE2.md, docs/PROVIDERS.md |
 | `wg review -1\|+1` / `--verdict -1\|+1 [--note]` | 2a stub | writes verdict onto last log line only |
 | `wg chat`, `run`, `feedback`, `evolve`, `report`, `proxy` | 2b–5 | stub, exit 2 |
 

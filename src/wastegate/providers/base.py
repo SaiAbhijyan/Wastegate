@@ -24,3 +24,7 @@ class Provider(Protocol):
     name: str
 
     def complete(self, model_id: str, system: str, messages: list[dict], max_tokens: int) -> Completion: ...
+
+
+class LiveDisabled(RuntimeError):
+    """Raised by live adapters unless a key is set AND the caller allowed network (--live)."""

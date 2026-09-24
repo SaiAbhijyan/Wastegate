@@ -1,6 +1,6 @@
 # PHASE 2: generation contract
 
-Status 2026-09-24: **2a (mock + dry-run) implemented. 2b (live providers) not started.** No live HTTP exists.
+Status 2026-09-24: **2a (mock + dry-run) implemented. 2b-prep: live adapters written but dark** (key + `--live` required; always off under pytest). No live call has been made. Verified field names: docs/PROVIDERS.md (supersedes the usage table below).
 
 ## Provider fabric (one interface)
 
@@ -27,11 +27,12 @@ If the fields are missing, the token count is `null`. We never count words or us
 
 ## `wg ask` pipeline
 
-gate → route → compose → **driver** → apply FILE blocks (path-guarded to the repo) → run repo tests (before/after exit codes) → **skeptic** (routed tier, cheaper than the driver when the route allows) → `escalate_slice(unresolved)` → JSONL log.
+gate → route → compose → **driver** → apply FILE blocks (path-guarded to the repo) → run repo tests (before/after exit codes) → **tester** (if routed; `TESTER: pass|fail` + `- finding` lines; failures join the unresolved list; a missing mock `tester.md` = skipped + reason) → **skeptic** (routed tier, cheaper than the driver when the route allows) → `escalate_slice(unresolved)` → JSONL log.
 
 - `--dry-run`: stops after compose. Generation is empty and no provider is called.
-- `--mock --replies DIR`: `MockProvider` returns `DIR/<role>.md`. Model IDs are `mock-local | mock-cheap | mock-mid`, never real IDs.
-- No mode: exit 2 ("live generation not implemented (Phase 2b)").
+- `--mock --replies DIR`: `MockProvider` returns `DIR/<role>.md`. Model IDs are `mock-cheap | mock-mid`, never real IDs.
+- `--live`: real adapters; exit 2 with `LiveDisabled` if the key is missing (checked before any write).
+- No mode: exit 2 (live not enabled).
 
 Driver edit format (a deliberately minimal whole-file replace; unified diffs are deferred):
 

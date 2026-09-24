@@ -19,4 +19,4 @@ class MockProvider:
 
 
 def mock_providers(replies_dir: Path):
-    return lambda role: MockProvider(replies_dir, role)
+    return lambda role, model_id=None: MockProvider(replies_dir, role)

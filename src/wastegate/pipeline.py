@@ -18,6 +18,7 @@ from .skills.registry import Skill
 from .systemone.base import GATE_QUESTIONS, SystemOne
 
 FILE_BLOCK = re.compile(r"^<<<FILE (\S+)\n(.*?)\n>>>$", re.DOTALL | re.MULTILINE)
+TESTER = re.compile(r"^\s*TESTER:\s*(pass|fail)\s*$", re.IGNORECASE | re.MULTILINE)
 VERDICT = re.compile(r"^\s*VERDICT:\s*(approve|reject)\s*$", re.IGNORECASE | re.MULTILINE)
 
 
@@ -43,10 +44,18 @@ def parse_edits(text: str, repo: Path) -> list[tuple[str, str]]:
     return edits
 
 
+def _findings(text: str) -> list[str]:
+    return [l.strip()[2:] for l in text.splitlines() if l.strip().startswith("- ")]
+
+
 def parse_skeptic(text: str) -> tuple[str, list[str]]:
     m = VERDICT.search(text)
-    findings = [l.strip()[2:] for l in text.splitlines() if l.strip().startswith("- ")]
-    return (m.group(1).lower() if m else "invalid"), findings
+    return (m.group(1).lower() if m else "invalid"), _findings(text)
+
+
+def parse_tester(text: str) -> tuple[str, list[str]]:
+    m = TESTER.search(text)
+    return (m.group(1).lower() if m else "invalid"), _findings(text)
 
 
 def run_tests(repo: Path) -> int:
@@ -73,7 +82,7 @@ def _total(calls: list[dict], key: str):
 
 
 def run_ask(prompt: str, repo: Path, s1: SystemOne, catalog: Catalog, cfg: RouterConfig,
-            registry: Mapping[str, Skill], providers: Optional[Callable[[str], Provider]] = None) -> TurnResult:
+            registry: Mapping[str, Skill], mode: str = "dry-run", providers: Optional[Callable[[str, Optional[str]], Provider]] = None) -> TurnResult:
     """providers=None means dry-run: no generation."""
     gate = s1.decide(prompt, GATE_QUESTIONS)
     r = route(gate, catalog, cfg)
@@ -93,10 +102,18 @@ def run_ask(prompt: str, repo: Path, s1: SystemOne, catalog: Catalog, cfg: Route
         t.append("generation: (empty, dry-run)")
         return out
 
-    out.record["mode"] = "mock"
+    out.record["mode"] = mode
     sk = next((s for s in r.specialists if s.role == "skeptic"), None)
-    drv_p = providers("driver")                      # resolve every provider before any write
-    sk_p = providers("skeptic") if sk is not None else None
+    ts = next((s for s in r.specialists if s.role == "tester"), None)
+    # resolve every provider before any write
+    drv_p = providers("driver", r.driver.model)
+    sk_p = providers("skeptic", sk.model) if sk is not None else None
+    ts_p, tester = None, {"status": "not routed", "findings": [], "reason": ""}
+    if ts is not None:
+        try:
+            ts_p = providers("tester", ts.model)
+        except FileNotFoundError as e:  # missing tester reply = skip, not abort
+            tester = {"status": "skipped", "findings": [], "reason": str(e)}
     msgs = [{"role": "user", "content": prompt}]
     drv = drv_p.complete(r.driver.model, c.system, msgs, r.driver.budget_tokens)
     calls = [_call("driver", r.driver.tier, drv)]
@@ -110,6 +127,19 @@ def run_ask(prompt: str, repo: Path, s1: SystemOne, catalog: Catalog, cfg: Route
     t.append(f"tests: before={before} after={after}")
 
     unresolved: list[str] = []
+    if ts_p is not None:
+        tmsg = [{"role": "user", "content": f"Task: {prompt}\nEdits: {[e for e, _ in edits]}\n"
+                                            f"Tests before={before} after={after}\nReply TESTER: pass|fail."}]
+        tc = ts_p.complete(ts.model, "Role: tester.", tmsg, ts.budget_tokens)
+        calls.append(_call("tester", ts.tier, tc))
+        status, tf = parse_tester(tc.text)
+        tester = {"status": status, "findings": tf, "reason": ""}
+        if status != "pass":
+            unresolved += tf or [f"tester reply {status}"]
+        t.append(f"tester ({ts.tier} {ts.model}): {status}" + "".join(f"\n  - {f}" for f in tf))
+    elif ts is not None:
+        t.append(f"tester: {tester['status']} ({tester['reason']})")
+
     verdict, findings = None, []
     if sk is not None:
         review_msg = [{"role": "user", "content": f"Task: {prompt}\nEdits: {[e for e, _ in edits]}\n"
@@ -132,7 +162,7 @@ def run_ask(prompt: str, repo: Path, s1: SystemOne, catalog: Catalog, cfg: Route
         calls=calls, provider=drv.provider, model_id=drv.model_id,
         tokens_in=_total(calls, "tokens_in"), tokens_out=_total(calls, "tokens_out"), usd=_total(calls, "usd"),
         edits=[e for e, _ in edits], tests={"before": before, "after": after},
-        skeptic={"verdict": verdict, "findings": findings},
+        tester=tester, skeptic={"verdict": verdict, "findings": findings}, unresolved=unresolved,
         escalation={"slice": asdict(sl) if sl else None, "reason": why})
-    t.append("tokens/usd: null (mock provider reports no usage)")
+    t.append(f"tokens in/out: {out.record['tokens_in']}/{out.record['tokens_out']} (provider-reported; null if any call lacked usage); usd: null (no verified price)")
     return out
