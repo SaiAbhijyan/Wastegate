@@ -25,7 +25,7 @@ def post_json(url: str, headers: dict, body: dict) -> dict:
 
 class LiveAdapter:
     name = ""
-    key_env = ""
+    key_envs: tuple[str, ...] = ()
 
     def __init__(self, allow_network: bool = False, transport: Optional[Transport] = None):
         self.allow_network = allow_network
@@ -35,7 +35,7 @@ class LiveAdapter:
         return f"{type(self).__name__}(allow_network={self.allow_network}, key={'set' if self._key() else 'unset'})"
 
     def _key(self) -> Optional[str]:
-        return os.environ.get(self.key_env) or None
+        return next((os.environ[v] for v in self.key_envs if os.environ.get(v)), None)
 
     def check(self) -> str:
         key = self._key()

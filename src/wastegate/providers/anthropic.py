@@ -7,7 +7,7 @@ from .http import LiveAdapter
 
 class AnthropicProvider(LiveAdapter):
     name = "anthropic"
-    key_env = "ANTHROPIC_API_KEY"
+    key_envs = ("ANTHROPIC_API_KEY",)
     url = "https://api.anthropic.com/v1/messages"
 
     def build(self, key, model_id, system, messages, max_tokens):

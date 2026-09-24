@@ -36,7 +36,8 @@ def test_no_keys_means_no_live_catalog():
 
 def test_openai_key_only_selects_openai(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k-openai-only")
-    cat = live_catalog(load_catalog())
+    monkeypatch.setenv("ALLOW_PAID", "1")  # openai is paid: ignored unless allowed
+    cat = live_catalog(load_catalog(), allow_paid=True)
     assert {m.provider for m in cat.models} == {"openai"}
     get = live_providers(cat, allow_network=True, transport=lambda *a: {})
     model = cat.first("mid")
@@ -45,6 +46,7 @@ def test_openai_key_only_selects_openai(monkeypatch):
 
 def test_live_pipeline_with_fake_transport_uses_openai(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k-openai-only")
+    monkeypatch.setenv("ALLOW_PAID", "1")  # openai is paid: ignored unless allowed
     repo = tmp_path / "tiny_pkg"
     shutil.copytree(FIXTURES / "tiny_pkg", repo)
     driver_text = (FIXTURES / "replies/fix_add/driver.md").read_text()
@@ -58,7 +60,7 @@ def test_live_pipeline_with_fake_transport_uses_openai(tmp_path, monkeypatch):
         return {"choices": [{"message": {"content": text}}],
                 "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13}}
 
-    cat = live_catalog(load_catalog())
+    cat = live_catalog(load_catalog(), allow_paid=True)
     res = run_ask(PROMPT, repo, HeuristicSystemOne(), cat, RouterConfig(), load_builtin(),
                   mode="live", providers=live_providers(cat, True, transport=transport))
     rec = res.record
@@ -73,6 +75,7 @@ def test_live_pipeline_with_fake_transport_uses_openai(tmp_path, monkeypatch):
 
 def test_cli_live_openai_key_under_pytest_exits_2_without_writes(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k-openai-only")
+    monkeypatch.setenv("ALLOW_PAID", "1")  # openai is paid: ignored unless allowed
     repo = tmp_path / "tiny_pkg"
     shutil.copytree(FIXTURES / "tiny_pkg", repo)
     monkeypatch.chdir(tmp_path)

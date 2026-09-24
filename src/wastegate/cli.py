@@ -176,6 +176,7 @@ def ask(text: str,
         dry_run: bool = typer.Option(False, "--dry-run", help="route + compose, no generation"),
         mock: bool = typer.Option(False, "--mock", help="scripted replies, no network"),
         live: bool = typer.Option(False, "--live", help="allow network; needs the provider key in env"),
+        allow_paid: bool = typer.Option(False, "--allow-paid", help="with --live: allow paid keys/models (or ALLOW_PAID=1)"),
         replies: Optional[Path] = typer.Option(None, help="dir with <role>.md replies (with --mock)"),
         repo: Path = typer.Option(Path("."), help="repo the driver edits and tests run in")):
     """One-shot routed task: --dry-run, --mock, or --live (exactly one)."""
@@ -194,7 +195,7 @@ def ask(text: str,
     name = cfg.get("systemone", {}).get("backend", "heuristic")
     try:
         catalog = {"mock": mock_catalog, "dry-run": load_catalog,
-                   "live": lambda: live_catalog(load_catalog())}[mode]()
+                   "live": lambda: live_catalog(load_catalog(), allow_paid=allow_paid)}[mode]()
     except LiveDisabled as e:
         out.print(f"live: {e}")
         raise typer.Exit(2)

@@ -25,5 +25,6 @@ def _no_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", refuse)
     monkeypatch.setattr(socket.socket, "connect_ex", refuse)
     monkeypatch.setattr(socket, "create_connection", refuse)
-    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"):
+    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY",
+                "GEMINI_API_KEY", "GOOGLE_API_KEY", "GITHUB_TOKEN", "ALLOW_PAID"):
         monkeypatch.delenv(var, raising=False)

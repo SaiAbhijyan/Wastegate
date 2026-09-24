@@ -48,3 +48,31 @@ Source: https://openrouter.ai/docs/api-reference/overview
   - openai `gpt-5.4-mini` (cheap), `gpt-5.6-terra` (mid), `gpt-6-astra` (frontier). The IDs are in the `ModelIdsShared` enum of openai-openapi `openapi.yaml`, fetched 2026-09-24. Tier placement is our judgment; the mid and frontier placements follow MISSION.
   - openrouter `openai/gpt-4o` (cheap), `openai/gpt-5.2` (mid). These IDs were seen only in request examples on the OpenRouter overview page (2026-09-24). Their current availability is unverified. Tier placement is our judgment.
 - **Provider selection under `--live`**: `live_catalog()` keeps only the rows whose provider key is set. With only `OPENAI_API_KEY` set, every routed call goes to OpenAI rows; it never silently falls back to Anthropic. No keys at all → `LiveDisabled`, exit 2, before any write. With several keys, the first row per tier in `models.toml` order wins (Anthropic first).
+
+## Free-tier providers (added 2026-09-24): same `OpenAICompatible` client, different base URL and key
+
+| provider | endpoint | key env | request max-tokens field | usage fields | status |
+|---|---|---|---|---|---|
+| Groq | `https://api.groq.com/openai/v1/chat/completions` | `GROQ_API_KEY` | `max_completion_tokens` | `usage.prompt_tokens`, `usage.completion_tokens` | base URL + env verified (console.groq.com/docs/openai); path, usage, max field verified (console.groq.com/docs/api-reference) |
+| Gemini | `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions` | `GEMINI_API_KEY`, else `GOOGLE_API_KEY` | `max_tokens` | parsed as OpenAI `prompt_tokens`/`completion_tokens` | base, path, `Authorization: Bearer $GEMINI_API_KEY` verified (ai.google.dev/gemini-api/docs/openai). **Unverified:** usage field names, max-tokens field, and `GOOGLE_API_KEY` (accepted at user request; not on that page) |
+| OpenRouter `:free` | same as OpenRouter above | `OPENROUTER_API_KEY` | `max_tokens` (unverified) | as OpenRouter above | `:free` IDs taken from raw `openrouter.ai/api/v1/models` JSON (pricing prompt/completion `"0"`), each model page fetched (HTTP 200, exact ID in raw HTML) |
+
+If a provider omits usage, `usage=None` and the log shows `tokens_in/out = null`. It is never estimated.
+
+**Conflict recorded:** a WebFetch of `openrouter.ai/api/v1/models` returned a truncated, garbled summary. It claimed there were no `:free` IDs and listed ID prefixes that are not in the JSON. The raw JSON from the same URL (460 models, 20 `:free`) is the source of truth.
+
+### Paid gate (`providers/live.py`)
+- Paid means provider `anthropic` or `openai`, or an `openrouter` ID that does not end in `:free`. Groq and Gemini are free-tier providers. That does **not** guarantee $0 (docs/KEYS.md).
+- `--live` keeps only rows whose key is set, then drops paid rows unless `--allow-paid` is passed or `ALLOW_PAID=1` (exactly `1`). One switch covers both.
+- No keys → `no key or --live not set`. Only paid keys → `only paid keys/models available; set ALLOW_PAID=1 or pass --allow-paid`. Both exit 2 before any write.
+- Several keys: the first row per tier in `models.toml` order wins.
+
+### Free model rows (all `verified=false`; tier placement is our judgment; coding ability is not verified by us)
+| provider | tier | id | seen on |
+|---|---|---|---|
+| groq | cheap | `openai/gpt-oss-20b` | console.groq.com/docs/models (Production) |
+| groq | mid | `openai/gpt-oss-120b` | console.groq.com/docs/models (Production) |
+| gemini | cheap | `gemini-3.5-flash-lite` | ai.google.dev/gemini-api/docs/models (Stable) |
+| gemini | mid | `gemini-3.8-flash` | ai.google.dev/gemini-api/docs/models (Stable), docs/openai examples |
+| openrouter | cheap | `cohere/north-mini-code:free` | raw openrouter.ai/api/v1/models JSON + model page |
+| openrouter | mid | `qwen/qwen3.8-27b:free` | raw openrouter.ai/api/v1/models JSON + model page |

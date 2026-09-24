@@ -2,21 +2,39 @@ from __future__ import annotations
 
 import os
 
-from ..catalog import Catalog
+from ..catalog import Catalog, Model
 from .anthropic import AnthropicProvider
 from .base import LiveDisabled
+from .gemini import GeminiProvider
+from .groq import GroqProvider
 from .openai import OpenAIProvider
 from .openrouter import OpenRouterProvider
 
-ADAPTERS = {"anthropic": AnthropicProvider, "openai": OpenAIProvider, "openrouter": OpenRouterProvider}
+ADAPTERS = {"anthropic": AnthropicProvider, "openai": OpenAIProvider, "openrouter": OpenRouterProvider,
+            "groq": GroqProvider, "gemini": GeminiProvider}
+PAID_PROVIDERS = {"anthropic", "openai"}
 
 
-def live_catalog(catalog: Catalog) -> Catalog:
-    """Only rows whose provider key is set, so --live never silently uses another provider."""
-    keyed = {name for name, cls in ADAPTERS.items() if os.environ.get(cls.key_env)}
+def is_paid(m: Model) -> bool:
+    """Groq/Gemini are free-tier providers (not a $0 guarantee: see docs/KEYS.md)."""
+    return m.provider in PAID_PROVIDERS or (m.provider == "openrouter" and not m.id.endswith(":free"))
+
+
+def paid_allowed(flag: bool = False) -> bool:
+    return flag or os.environ.get("ALLOW_PAID") == "1"
+
+
+def live_catalog(catalog: Catalog, allow_paid: bool = False) -> Catalog:
+    """Rows whose provider key is set; paid rows dropped unless --allow-paid / ALLOW_PAID=1.
+    --live never silently falls back to another provider."""
+    keyed = {name for name, cls in ADAPTERS.items() if any(os.environ.get(v) for v in cls.key_envs)}
     sub = catalog.for_providers(keyed)
     if not sub.models:
         raise LiveDisabled("no key or --live not set")
+    if not paid_allowed(allow_paid):
+        sub = type(sub)([m for m in sub.models if not is_paid(m)])
+        if not sub.models:
+            raise LiveDisabled("only paid keys/models available; set ALLOW_PAID=1 or pass --allow-paid")
     return sub
 
 

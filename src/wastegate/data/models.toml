@@ -71,3 +71,53 @@ provider = "openrouter"
 name = "GPT-5.2 via OpenRouter"
 verified = false
 source = "openrouter docs overview example, 2026-09-24; tier = our judgment"
+
+# Free-tier providers. IDs seen 2026-09-24 on the pages named in `source` (WebFetch + raw grep).
+# verified=false: in this catalog "verified" is reserved for a successful live call. No prices.
+[[model]]
+tier = "cheap"
+id = "openai/gpt-oss-20b"
+provider = "groq"
+name = "gpt-oss-20b on Groq"
+verified = false
+source = "console.groq.com/docs/models (Production), 2026-09-24; tier = our judgment"
+
+[[model]]
+tier = "mid"
+id = "openai/gpt-oss-120b"
+provider = "groq"
+name = "gpt-oss-120b on Groq"
+verified = false
+source = "console.groq.com/docs/models (Production), 2026-09-24; tier = our judgment"
+
+[[model]]
+tier = "cheap"
+id = "gemini-3.5-flash-lite"
+provider = "gemini"
+name = "Gemini 3.5 Flash-Lite"
+verified = false
+source = "ai.google.dev/gemini-api/docs/models (Stable), 2026-09-24; free-tier availability unverified; tier = our judgment"
+
+[[model]]
+tier = "mid"
+id = "gemini-3.8-flash"
+provider = "gemini"
+name = "Gemini 3.8 Flash"
+verified = false
+source = "ai.google.dev/gemini-api/docs/models (Stable) + docs/openai examples, 2026-09-24; free-tier availability unverified; tier = our judgment"
+
+[[model]]
+tier = "cheap"
+id = "cohere/north-mini-code:free"
+provider = "openrouter"
+name = "North Mini Code (free) via OpenRouter"
+verified = false
+source = "openrouter.ai/api/v1/models raw JSON (pricing 0/0) + model page, 2026-09-24; tier = our judgment"
+
+[[model]]
+tier = "mid"
+id = "qwen/qwen3.8-27b:free"
+provider = "openrouter"
+name = "Qwen3.8 27B (free) via OpenRouter"
+verified = false
+source = "openrouter.ai/api/v1/models raw JSON (pricing 0/0) + model page, 2026-09-24; tier = our judgment"

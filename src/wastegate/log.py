@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SECRET_ENV = ("TYPESAFE_API_KEY", "JEV_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
-              "OPENROUTER_API_KEY", "LAYA_API_KEY")
+              "OPENROUTER_API_KEY", "LAYA_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+              "GITHUB_TOKEN")
 PATTERNS = [
     re.compile(r"sk-[A-Za-z0-9_\-]{16,}"),
     re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"),

@@ -6,6 +6,6 @@ from .http import OpenAICompatible
 
 class OpenAIProvider(OpenAICompatible):
     name = "openai"
-    key_env = "OPENAI_API_KEY"
+    key_envs = ("OPENAI_API_KEY",)
     url = "https://api.openai.com/v1/chat/completions"
     max_tokens_field = "max_completion_tokens"

@@ -8,5 +8,5 @@ from .http import OpenAICompatible
 
 class OpenRouterProvider(OpenAICompatible):
     name = "openrouter"
-    key_env = "OPENROUTER_API_KEY"
+    key_envs = ("OPENROUTER_API_KEY",)
     url = "https://openrouter.ai/api/v1/chat/completions"
