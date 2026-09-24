@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -12,9 +13,11 @@ from rich.console import Console
 from rich.table import Table
 
 from . import config as cfgmod
-from .catalog import load_catalog
+from .catalog import load_catalog, mock_catalog
 from .compose import compose
 from .log import TurnLogger
+from .pipeline import UnsafeEdit, run_ask
+from .providers.mock import mock_providers
 from .router import route as do_route
 from .skills.registry import load_builtin
 from .systemone.base import GATE_QUESTIONS
@@ -161,9 +164,37 @@ def _stub(phase: str):
 
 
 @app.command()
-def ask(text: str):
-    """One-shot routed task (Phase 2)."""
-    _stub("Phase 2")
+def ask(text: str,
+        dry_run: bool = typer.Option(False, "--dry-run", help="route + compose, no generation"),
+        mock: bool = typer.Option(False, "--mock", help="scripted replies, no network"),
+        replies: Optional[Path] = typer.Option(None, help="dir with <role>.md replies (with --mock)"),
+        repo: Path = typer.Option(Path("."), help="repo the driver edits and tests run in")):
+    """One-shot routed task. Session 2: --dry-run or --mock only."""
+    if dry_run and mock:
+        out.print("choose one of --dry-run / --mock")
+        raise typer.Exit(2)
+    if not (dry_run or mock):
+        out.print("live generation not implemented (Phase 2b); use --dry-run or --mock")
+        raise typer.Exit(2)
+    if mock and replies is None:
+        out.print("--mock needs --replies DIR")
+        raise typer.Exit(2)
+    cfg = cfgmod.load()
+    name = cfg.get("systemone", {}).get("backend", "heuristic")
+    s1 = BACKENDS[name]()
+    try:
+        res = run_ask(text, repo, s1, mock_catalog() if mock else load_catalog(),
+                      cfgmod.router_config(cfg), load_builtin(),
+                      providers=mock_providers(replies) if mock else None)
+    except NotImplementedError as e:
+        out.print(f"{name}: {e}")
+        raise typer.Exit(2)
+    except (UnsafeEdit, FileNotFoundError) as e:
+        out.print(f"aborted, no edits written: {e}")
+        raise typer.Exit(1)
+    TurnLogger(Path(".wastegate/logs")).write(res.record)
+    for line in res.transcript:
+        out.print(line, markup=False)
 
 
 @app.command()
@@ -172,10 +203,22 @@ def chat():
     _stub("Phase 2")
 
 
-@app.command()
-def review(verdict: str, note: Optional[str] = typer.Option(None)):
-    """Human review of last turn (Phase 4)."""
-    _stub("Phase 4")
+@app.command(context_settings={"ignore_unknown_options": True})
+def review(verdict_arg: Optional[str] = typer.Argument(None, metavar="VERDICT", help="+1 or -1"),
+           verdict: Optional[str] = typer.Option(None, "--verdict", help="+1 or -1"),
+           note: Optional[str] = typer.Option(None, "--note")):
+    """Stub: attach +1/-1 (and a note) to the last logged turn. Instincts are Phase 4."""
+    given = [v for v in (verdict_arg, verdict) if v is not None]
+    if len(given) != 1 or given[0] not in ("+1", "-1"):
+        out.print("give exactly one verdict: +1 or -1 (positional or --verdict)")
+        raise typer.Exit(2)
+    try:
+        TurnLogger(Path(".wastegate/logs")).set_last_review(
+            {"verdict": given[0], "note": note, "ts": datetime.now(timezone.utc).isoformat()})
+    except FileNotFoundError as e:
+        out.print(str(e))
+        raise typer.Exit(1)
+    out.print(f"review {given[0]} attached to last turn")
 
 
 @app.command()

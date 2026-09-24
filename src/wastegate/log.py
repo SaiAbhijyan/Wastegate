@@ -35,9 +35,21 @@ class TurnLogger:
 
     def write(self, record: dict) -> dict:
         rec = {"ts": datetime.now(timezone.utc).isoformat(), "turn_id": uuid.uuid4().hex,
-               "tokens": None, "usd": None, **record}
+               "provider": None, "model_id": None, "tokens_in": None, "tokens_out": None,
+               "usd": None, "calls": [], "review": None, **record}
         line = redact(json.dumps(rec, default=str, sort_keys=True))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a") as f:
             f.write(line + "\n")
         return json.loads(line)
+
+    def set_last_review(self, review: dict) -> dict:
+        """Attach a review to the last turn. Raises FileNotFoundError if there is no turn."""
+        lines = self.path.read_text().splitlines() if self.path.exists() else []
+        if not lines:
+            raise FileNotFoundError(f"no logged turn in {self.path}")
+        rec = json.loads(lines[-1])
+        rec["review"] = review
+        lines[-1] = redact(json.dumps(rec, default=str, sort_keys=True))
+        self.path.write_text("\n".join(lines) + "\n")
+        return rec

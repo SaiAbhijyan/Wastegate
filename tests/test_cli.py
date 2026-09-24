@@ -50,7 +50,7 @@ def test_init_idempotent(tmp_path, monkeypatch):
 
 
 def test_stubs_exit_2():
-    for cmd in (["ask", "x"], ["chat"], ["review", "+1"], ["evolve"], ["report"]):
+    for cmd in (["chat"], ["evolve"], ["report"]):
         r = runner.invoke(app, cmd)
         assert r.exit_code == 2, cmd
         assert "not implemented" in r.output

@@ -31,3 +31,4 @@ wastegate = ["data/*.toml", "skills/builtin/*/SKILL.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+norecursedirs = ["fixtures"]

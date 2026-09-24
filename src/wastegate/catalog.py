@@ -51,3 +51,8 @@ def load_catalog(path: Path | None = None) -> Catalog:
     raw = Path(path).read_bytes() if path else resources.files("wastegate").joinpath("data/models.toml").read_bytes()
     data = tomllib.loads(raw.decode())
     return Catalog([Model(**m) for m in data.get("model", [])])
+
+
+def mock_catalog() -> Catalog:
+    """Mock tiers mirror the default catalog's shape (cheap + mid, no frontier); never real IDs."""
+    return Catalog([Model(t, f"mock-{t}", "mock", f"mock {t}", False, "mock") for t in ("cheap", "mid")])

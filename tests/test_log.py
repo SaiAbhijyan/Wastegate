@@ -25,4 +25,6 @@ def test_logger_redacts_env_key_values(tmp_path, monkeypatch, var):
     assert "plainvalue-no-pattern-777" not in raw
     assert "sk-ant-XXXXXXXXXXXXXXXXXXXX" not in raw
     rec = json.loads(raw.splitlines()[0])
-    assert rec["tokens"] is None and rec["usd"] is None and "ts" in rec and "turn_id" in rec
+    for f in ("provider", "model_id", "tokens_in", "tokens_out", "usd", "review"):
+        assert rec[f] is None, f
+    assert rec["calls"] == [] and "ts" in rec and "turn_id" in rec
