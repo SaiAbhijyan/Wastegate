@@ -31,7 +31,7 @@ gate → route → compose → **driver** → apply FILE blocks (path-guarded to
 
 - `--dry-run`: stops after compose. Generation is empty and no provider is called.
 - `--mock --replies DIR`: `MockProvider` returns `DIR/<role>.md`. Model IDs are `mock-cheap | mock-mid`, never real IDs.
-- `--live`: real adapters; exit 2 with `LiveDisabled` if the key is missing (checked before any write).
+- `--live`: real adapters on the key-filtered catalog (docs/PROVIDERS.md). Exit 2 with `LiveDisabled` if no key is set (checked before any write). A successful live run also writes `results/YYYYMMDD-live-smoke.md` (never overwritten), with each call's raw `usage` JSON exactly as returned, keys redacted, and `usd: null`. One invocation makes up to 3 provider calls (driver, tester, skeptic). **Not run yet: no key has been provided.**
 - No mode: exit 2 (live not enabled).
 
 Driver edit format (a deliberately minimal whole-file replace; unified diffs are deferred):

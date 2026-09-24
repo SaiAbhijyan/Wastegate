@@ -27,3 +27,17 @@ def load_labels(path: Path) -> list[LabelRow]:
         if m:
             rows.append(LabelRow(*m.groups()))
     return rows
+
+
+POOL_ROW = re.compile(r"^\|\s*(P\d{2})\s*\|\s*(.+?)\s*\|\s*$")
+
+
+@dataclass(frozen=True)
+class PoolRow:
+    id: str
+    prompt: str
+
+
+def load_pool(path: Path) -> list[PoolRow]:
+    return [PoolRow(*m.groups()) for line in Path(path).read_text().splitlines()
+            if (m := POOL_ROW.match(line))]

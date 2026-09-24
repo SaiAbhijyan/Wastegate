@@ -19,7 +19,10 @@ from .compose import compose
 from .log import TurnLogger
 from .pipeline import UnsafeEdit, run_ask
 from .providers.base import LiveDisabled
-from .providers.live import live_providers
+from .providers.live import live_catalog, live_providers
+from .smoke import write_smoke_report
+from .labels import load_pool
+from .systemone.base import GATE_QUESTIONS as _GQ
 from .providers.mock import mock_providers
 from .router import route as do_route
 from .skills.registry import load_builtin
@@ -32,7 +35,9 @@ app = typer.Typer(no_args_is_help=True, add_completion=False, help="Cheap-first,
 skills_app = typer.Typer(no_args_is_help=True, help="Built-in and imported skills.")
 eval_app = typer.Typer(no_args_is_help=True, help="Frozen eval suites.")
 app.add_typer(skills_app, name="skills")
+label_app = typer.Typer(no_args_is_help=True, help="Human labeling (no model predictions shown).")
 app.add_typer(eval_app, name="eval")
+app.add_typer(label_app, name="label")
 out = Console(highlight=False, soft_wrap=True)
 
 LABELS = Path("evals/route_quality/labels.md")
@@ -187,7 +192,12 @@ def ask(text: str,
         raise typer.Exit(2)
     cfg = cfgmod.load()
     name = cfg.get("systemone", {}).get("backend", "heuristic")
-    catalog = mock_catalog() if mode == "mock" else load_catalog()
+    try:
+        catalog = {"mock": mock_catalog, "dry-run": load_catalog,
+                   "live": lambda: live_catalog(load_catalog())}[mode]()
+    except LiveDisabled as e:
+        out.print(f"live: {e}")
+        raise typer.Exit(2)
     providers = {"dry-run": None, "mock": mock_providers(replies) if replies else None,
                  "live": live_providers(catalog, allow_network=True)}[mode]
     try:
@@ -205,6 +215,9 @@ def ask(text: str,
     TurnLogger(Path(".wastegate/logs")).write(res.record)
     for line in res.transcript:
         out.print(line, markup=False)
+    if mode == "live":
+        p = write_smoke_report(res.record, Path("results"), datetime.now(timezone.utc).strftime("%Y%m%d"))
+        out.print(f"smoke report: {p}")
 
 
 @app.command()
@@ -241,3 +254,37 @@ def evolve(dry_run: bool = typer.Option(False, "--dry-run"), apply: bool = typer
 def report():
     """Tokens, $, win-rate, ECE (Phase 3)."""
     _stub("Phase 3")
+
+
+@label_app.command("new")
+def label_new(out_path: Path = typer.Option(..., "--out", help="append-only JSONL, e.g. evals/route_quality/human.jsonl"),
+              pool: Path = typer.Option(Path("evals/route_quality/pool.md"), "--pool"),
+              labeler: str = typer.Option(..., "--labeler", help="who is labeling")):
+    """Show one unlabeled pool prompt at a time; record the human's `kind`. Never shows a prediction."""
+    rows = load_pool(pool)
+    pool_sha = hashlib.sha256(pool.read_bytes()).hexdigest()
+    done = set()
+    if out_path.exists():
+        done = {json.loads(l)["id"] for l in out_path.read_text().splitlines() if l.strip()}
+    todo = [r for r in rows if r.id not in done]
+    kinds = _GQ["kind"].options
+    out.print(f"{len(todo)} unlabeled of {len(rows)}. Rubric: evals/route_quality/labels.md (kind). "
+              f"Answer one of: {', '.join(kinds)}; s=skip, q=quit.")
+    read = typer.confirm("Have you read src/wastegate/systemone/heuristic.py?", default=False)
+    for i, r in enumerate(todo):
+        out.print(f"\n{r.id} ({len(todo) - i} left): {r.prompt}", markup=False)
+        while True:
+            ans = typer.prompt("kind").strip().lower()
+            if ans in kinds or ans in ("s", "q"):
+                break
+            out.print(f"not a kind: {ans!r}")
+        if ans == "q":
+            break
+        if ans == "s":
+            continue
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with out_path.open("a") as f:
+            f.write(json.dumps({"id": r.id, "prompt": r.prompt, "kind": ans, "labeler": labeler,
+                                "read_heuristic": read, "pool_sha256": pool_sha,
+                                "rubric": "labels.md kind v1",
+                                "ts": datetime.now(timezone.utc).isoformat()}) + "\n")

@@ -44,4 +44,7 @@ Source: https://openrouter.ai/docs/api-reference/overview
 - `usd` stays `null` unless the catalog row is `verified=true` and has a dated price copied from a fetched pricing page. No prices are in `models.toml`, and no pricing page was fetched.
 - Env keys: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`. They are read at call time. They are never logged (`log.redact` masks their values) and never repr'd.
 - `ANTHROPIC_BASE_URL` is not read. The endpoints are fixed constants above. OmniRoute and Headroom are not wired.
-- The catalog today has only `provider = "anthropic"` rows, so `--live` can reach only the Anthropic adapter until OpenAI or OpenRouter rows with verified IDs are added.
+- **Catalog rows** (all `verified=false`, no prices):
+  - openai `gpt-5.4-mini` (cheap), `gpt-5.6-terra` (mid), `gpt-6-astra` (frontier). The IDs are in the `ModelIdsShared` enum of openai-openapi `openapi.yaml`, fetched 2026-09-24. Tier placement is our judgment; the mid and frontier placements follow MISSION.
+  - openrouter `openai/gpt-4o` (cheap), `openai/gpt-5.2` (mid). These IDs were seen only in request examples on the OpenRouter overview page (2026-09-24). Their current availability is unverified. Tier placement is our judgment.
+- **Provider selection under `--live`**: `live_catalog()` keeps only the rows whose provider key is set. With only `OPENAI_API_KEY` set, every routed call goes to OpenAI rows; it never silently falls back to Anthropic. No keys at all → `LiveDisabled`, exit 2, before any write. With several keys, the first row per tier in `models.toml` order wins (Anthropic first).

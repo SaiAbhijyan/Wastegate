@@ -73,7 +73,7 @@ def _call(role: str, tier: str, c: Completion) -> dict:
     # usd stays None: no catalog price is verified (docs/PHASE2.md).
     return {"role": role, "tier": tier, "provider": c.provider, "model_id": c.model_id,
             "tokens_in": u.input_tokens if u else None, "tokens_out": u.output_tokens if u else None,
-            "usd": None}
+            "usd": None, "usage_raw": (c.raw or {}).get("usage")}
 
 
 def _total(calls: list[dict], key: str):

@@ -27,3 +27,47 @@ provider = "anthropic"
 name = "Fable 5.1"
 verified = false
 source = "session environment + MISSION, 2026-09-24"
+
+# OpenAI: IDs appear in the ModelIdsShared enum of openai/openai-openapi openapi.yaml
+# (fetched 2026-09-24, docs/PROVIDERS.md). Tier placement is our judgment, not OpenAI's.
+[[model]]
+tier = "cheap"
+id = "gpt-5.4-mini"
+provider = "openai"
+name = "GPT-5.4 mini"
+verified = false
+source = "openai-openapi ModelIdsShared enum, 2026-09-24; tier = our judgment"
+
+[[model]]
+tier = "mid"
+id = "gpt-5.6-terra"
+provider = "openai"
+name = "GPT-5.6 Terra"
+verified = false
+source = "openai-openapi ModelIdsShared enum, 2026-09-24; tier per MISSION"
+
+[[model]]
+tier = "frontier"
+id = "gpt-6-astra"
+provider = "openai"
+name = "GPT-6 Astra"
+verified = false
+source = "openai-openapi ModelIdsShared enum, 2026-09-24; tier per MISSION"
+
+# OpenRouter: IDs seen only in request examples on openrouter.ai/docs/api-reference/overview
+# (2026-09-24). Current availability on OpenRouter is unverified. Tier placement = our judgment.
+[[model]]
+tier = "cheap"
+id = "openai/gpt-4o"
+provider = "openrouter"
+name = "GPT-4o via OpenRouter"
+verified = false
+source = "openrouter docs overview example, 2026-09-24; tier = our judgment"
+
+[[model]]
+tier = "mid"
+id = "openai/gpt-5.2"
+provider = "openrouter"
+name = "GPT-5.2 via OpenRouter"
+verified = false
+source = "openrouter docs overview example, 2026-09-24; tier = our judgment"

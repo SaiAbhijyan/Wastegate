@@ -30,6 +30,9 @@ class Catalog:
     def tiers(self) -> list[str]:
         return [t for t in TIERS if any(m.tier == t for m in self.models)]
 
+    def for_providers(self, providers: set[str]) -> "Catalog":
+        return Catalog([m for m in self.models if m.provider in providers])
+
     def first(self, tier: str) -> Model | None:
         return next((m for m in self.models if m.tier == tier), None)
 
