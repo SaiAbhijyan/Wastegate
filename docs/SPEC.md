@@ -11,7 +11,9 @@
 | `wg skills add owner/repo` / `rm` | 1.1 | not implemented (clone → pin SHA → scan → quarantine) |
 | `wg models` | 1 | catalog by tier, with the `verified` flag |
 | `wg eval run --suite route_quality` | 3 | session 1: dry-prints the frozen label file + sha256 only |
-| `wg ask`, `chat`, `run`, `review`, `feedback`, `evolve`, `report`, `proxy` | 2–5 | stub, exit 2 |
+| `wg ask "…" --dry-run` / `--mock --replies DIR [--repo P]` | 2a | implemented (no network); no mode → exit 2. See docs/PHASE2.md |
+| `wg review -1\|+1` / `--verdict -1\|+1 [--note]` | 2a stub | writes verdict onto last log line only |
+| `wg chat`, `run`, `feedback`, `evolve`, `report`, `proxy` | 2b–5 | stub, exit 2 |
 
 `wastegate` and `wg` are the same entry point.
 
@@ -106,11 +108,13 @@ Prefix = role header + the bodies of the route's skills, in a fixed order, under
 {"ts": "...", "turn_id": "...", "prompt": "...", "backend": "heuristic",
  "gate": {"kind": {"value": "debug", "distribution": {...}, "confidence": 0.61}, "...": {}},
  "route": {...}, "skills": [{"id": "karpathy", "sha": "<sha256 of SKILL.md>"}],
- "models": [], "tokens": null, "usd": null, "latency_ms": 3,
+ "provider": null, "model_id": null, "tokens_in": null, "tokens_out": null, "usd": null,
+ "calls": [{"role": "driver", "provider": "mock", "model_id": "mock-mid", "tokens_in": null, "tokens_out": null, "usd": null}],
+ "latency_ms_gate": 3,
  "tool_trace": [], "tests": [], "review": null, "outcome": null}
 ```
 
-`tokens` and `usd` stay `null` until they come from a provider response. Redaction runs on the serialized line. It removes known key patterns (`sk-…`, `sk-ant-…`, `Bearer …`, `ghp_…`) and the literal values of the env keys above.
+`tokens_in`, `tokens_out`, `usd` stay `null` unless every call's provider response reported usage (and, for `usd`, a verified price exists). Redaction runs on the serialized line. It removes known key patterns (`sk-…`, `sk-ant-…`, `Bearer …`, `ghp_…`) and the literal values of the env keys above.
 
 ## Cost identity (measured in Phase 2+, never estimated)
 `C = C_system_one + C_cheap + C_mid + p_escalate · C_frontier`. Every term comes from provider usage fields × a catalog price that has a verification date.
