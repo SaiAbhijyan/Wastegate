@@ -1,0 +1,29 @@
+# Model catalog. verified=false until checked against the provider's model list with a date.
+# Prices intentionally absent: $ comes from provider usage x a verified price, never guessed.
+# IDs below come from the Claude Code session environment (2026-09-24), not from provider docs.
+# Non-Anthropic tiers (GPT-5.6 Terra, GPT-6 Astra, Gemini Flash, DeepSeek V4 Flash, Qwen local)
+# are omitted until their exact IDs are verified.
+
+[[model]]
+tier = "cheap"
+id = "claude-haiku-4-5-20251001"
+provider = "anthropic"
+name = "Haiku 4.5"
+verified = false
+source = "session environment, 2026-09-24"
+
+[[model]]
+tier = "mid"
+id = "claude-sonnet-5"
+provider = "anthropic"
+name = "Sonnet 5"
+verified = false
+source = "session environment, 2026-09-24"
+
+[[model]]
+tier = "frontier"
+id = "claude-fable-5-1"
+provider = "anthropic"
+name = "Fable 5.1"
+verified = false
+source = "session environment + MISSION, 2026-09-24"
