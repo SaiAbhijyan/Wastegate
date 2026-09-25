@@ -18,7 +18,7 @@ from . import config as cfgmod
 from .catalog import load_catalog, mock_catalog
 from .compose import compose
 from .instincts import add_instinct, load_instincts, select_instincts
-from .chat import ChatSession
+from .chat import ChatSession, reply_lines
 from .log import TurnLogger, redact
 from .pipeline import RepoError, UnsafeEdit, run_ask, validate_repo
 from .providers.base import LiveDisabled
@@ -261,6 +261,8 @@ def ask(text: str,
         out.print(f"provider error (edits may already be applied in {repo}): {redact(str(e))}", markup=False)
         raise typer.Exit(1)
     TurnLogger(Path(".wastegate/logs")).write(res.record)
+    for line in reply_lines(res.driver_text):
+        out.print(redact(line), markup=False)
     for line in res.transcript:
         out.print(redact(line), markup=False)  # model-written findings may echo secrets
     if mode == "live":

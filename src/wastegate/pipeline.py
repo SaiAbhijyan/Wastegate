@@ -89,6 +89,16 @@ class EditError(UnsafeEdit):
 class TurnResult:
     record: dict
     transcript: list[str] = field(default_factory=list)
+    driver_text: Optional[str] = None  # redacted + capped; None = no generation (dry-run)
+
+
+DRIVER_TEXT_CAP = 4_000
+
+
+def cap_text(text: str, limit: Optional[int] = DRIVER_TEXT_CAP) -> str:
+    """Redact first, then truncate, so a cut can never leave an unredacted key fragment. limit=None: no cap."""
+    from .log import redact
+    return redact(text)[:limit]
 
 
 def _guard(rel: str, root: Path) -> Path:
@@ -261,6 +271,7 @@ def run_followup(prompt: str, touched: list[str], before: int, after: int, fu_p,
         fmsgs = msgs + [{"role": "user", "content": FOLLOWUP_TEXT + f"\nRepo tests after your change: exit {after}."}]
         fc = fu_p.complete(model, system, fmsgs, budget)
         followup["ran"] = True
+        followup["text"] = cap_text(fc.text)
         try:
             fedits = parse_edits(fc.text, repo)
         except UnsafeEdit as e:
@@ -342,7 +353,7 @@ def run_ask(prompt: str, repo: Path, s1: SystemOne, catalog: Catalog, cfg: Route
     out = TurnResult(plan.record, plan.transcript)
     t = out.transcript
     if providers is None:
-        out.record.update(mode="dry-run", generation="")
+        out.record.update(mode="dry-run", generation="", driver_text=None)
         t.append("generation: (empty, dry-run)")
         return out
 
@@ -366,6 +377,8 @@ def run_ask(prompt: str, repo: Path, s1: SystemOne, catalog: Catalog, cfg: Route
     msgs = [{"role": "user", "content": user}]
     drv = drv_p.complete(r.driver.model, system, msgs, r.driver.budget_tokens)
     calls = [_call("driver", r.driver.tier, drv)]
+    out.driver_text = cap_text(drv.text, limit=None)       # full, redacted: for the terminal
+    out.record["driver_text"] = cap_text(drv.text)          # capped, redacted: for the log
     edits = parse_edits(drv.text, repo)  # raises before any write
     originals: dict[str, Optional[str]] = {}
     touched: list[str] = []

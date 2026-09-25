@@ -8,7 +8,7 @@ from typing import Callable, Mapping, Optional
 from .catalog import Catalog
 from .instincts import load_instincts
 from .log import TurnLogger
-from .pipeline import (ANY_EDIT, Plan, UnsafeEdit, _call, _snapshot, _try_provider, apply_edits, driver_request,
+from .pipeline import (ANY_EDIT, Plan, UnsafeEdit, _call, cap_text, _snapshot, _try_provider, apply_edits, driver_request,
                        followup_line, parse_edits, plan_turn, run_followup, run_tests, wants_test)
 from .providers.base import Provider
 from .router import RouterConfig
@@ -16,6 +16,13 @@ from .skills.registry import Skill
 from .systemone.base import SystemOne
 
 HISTORY = 10
+
+
+def reply_lines(driver_text):
+    """Driver reply first, before any gate/stats lines."""
+    if driver_text is None:
+        return ["driver reply: (no generation, dry-run)"]
+    return ["--- driver reply ---", driver_text.rstrip("\n"), "--- end driver reply ---"]
 
 
 class ChatSession:
@@ -34,9 +41,9 @@ class ChatSession:
         plan = plan_turn(text, self.s1, self.catalog, self.cfg, self.registry, rows)
         self.last = plan
         lines = list(plan.transcript)
-        rec = {**plan.record, "mode": f"chat-{self.mode}", "turn": self.n}
+        rec = {**plan.record, "mode": f"chat-{self.mode}", "turn": self.n, "driver_text": None}
         if self.providers is None:
-            lines.append("generation: (empty, dry-run)")
+            lines = reply_lines(None) + lines + ["generation: (empty, dry-run)"]
         else:
             r = plan.route
             drv_p = self.providers("driver", r.driver.model)  # resolve before any write
@@ -46,7 +53,8 @@ class ChatSession:
             msgs = self.history[-HISTORY:] + [{"role": "user", "content": user}]
             c = drv_p.complete(r.driver.model, system, msgs, r.driver.budget_tokens)
             calls = [_call("driver", r.driver.tier, c)]
-            lines.append(c.text)
+            rec["driver_text"] = cap_text(c.text)
+            lines = reply_lines(cap_text(c.text, limit=None)) + lines
             self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": c.text}]
             if ANY_EDIT.search(c.text) or (self.repo is not None and wants_test(text)):
                 lines += self._edits(c.text, rec, text, calls, fu_p, why_fu, r, system,
