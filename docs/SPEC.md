@@ -16,7 +16,8 @@
 | `wg review -1\|+1` / `--verdict -1\|+1 [--note]` | 4 (v0) | writes verdict onto last log line; `-1 --note` also saves an instinct |
 | `wg chat --dry-run \| --mock --replies DIR \| --live [--local] [--allow-paid] [--repo P]` | 2 | REPL; applies edits only with --repo; /route /skills /exit |
 | `wg ask … --live --local` | 2 | local Ollama, keyless; down → exit 2 |
-| `wg run`, `feedback`, `evolve`, `report`, `proxy` | 3–5 | stub, exit 2 (`run`, `feedback`, `proxy` not registered) |
+| `wg run …` | 2 | alias of `wg ask` (same flags) |
+| `wg feedback`, `evolve`, `report`, `proxy` | 3–5 | stub, exit 2 (`feedback`, `proxy` not registered) |
 
 `wastegate` and `wg` are the same entry point.
 

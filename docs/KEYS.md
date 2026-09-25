@@ -24,7 +24,7 @@ Written 2026-09-24. Keys live in env vars only. They never go in config files, l
 | 3 | OpenRouter `:free` | https://openrouter.ai/keys | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | wired (dark). Only model IDs ending in `:free` are used unless paid is allowed |
 | 4 | GitHub Models (optional) | GitHub token | not recorded | `GITHUB_TOKEN` | **not wired**. Value is redacted from logs |
 | 5 | Cerebras (optional) | not recorded | not recorded | not chosen | **not wired** |
-| 6 | Ollama, local (optional) | none | `http://127.0.0.1:11434/v1` | none | **not wired** |
+| 6 | Ollama, local (optional) | none | `http://127.0.0.1:11434/v1` | none | wired: `--live --local` (model `qwen2.5-coder:7b`, `ollama pull` it) |
 
 Rows 4–6 are listed for later. Their URLs and base URLs were not checked this session.
 

@@ -2,26 +2,58 @@
 
 Cheap until it isn't. A System-One gated coding CLI: cheap models first, Fable/Astra only when the gate opens. Skills, MoE-style routing (role × skill × model tier), measured token spend.
 
-## Quickstart (no keys needed)
+## Quickstart
+
+Install (Python ≥ 3.10):
 
 ```bash
+git clone https://github.com/SaiAbhijyan/Wastegate && cd Wastegate
 pip install -e '.[dev]'
-wg route "fix the deadlock in worker.py"          # gate + expert mix, no LLM
-wg prompt "fix the deadlock in worker.py"         # composed system prompt (skills + instincts)
-wg ask --dry-run "fix the bug in tiny_pkg"        # route + compose, no generation
-wg ask --mock --replies tests/fixtures/replies/fix_add --repo <copy of tests/fixtures/tiny_pkg> "fix the bug"
-wg chat --dry-run                                 # REPL: /route /skills /exit
-wg review -1 --note "prefer stdlib"               # saves an instinct, injected into later turns
-wg skills ls; wg models
 ```
 
-With a free key in env (`GROQ_API_KEY`, `GEMINI_API_KEY` or `OPENROUTER_API_KEY`, see docs/KEYS.md):
-`wg ask --live --repo <dir> "…"` and `wg chat --live --repo <dir>`. For local Ollama (no key): `--live --local`.
-Paid providers are ignored unless you pass `--allow-paid`.
+### Zero-key (works offline)
 
-Edits from the model use `<<<REPLACE path / <<<WITH / <<<END` or `<<<FILE path … >>>`. They are applied only inside `--repo`, and nothing is written unless every edit resolves.
+```bash
+wg route  "fix the off-by-one in sliding_windows"     # gate + expert mix, no LLM
+wg prompt "fix the off-by-one in sliding_windows"     # composed system prompt (skills + instincts)
+wg chat --dry-run                                      # REPL: /route /skills /exit
 
-Status: Phase 2 (routing, skills, instincts v0, ask/chat with dry-run, mock and live). See docs/MISSION.md and docs/PHASE2.md.
+cp -r tests/fixtures/off_by_one /tmp/obo               # a real off-by-one with a failing test
+wg ask --mock --replies tests/fixtures/replies/off_by_one --repo /tmp/obo "fix the off-by-one in sliding_windows"
+wg review -1 --note "prefer stdlib over new deps"      # saves an instinct for later turns
+```
+
+`wg run` is an alias of `wg ask` (same flags).
+
+### Free live model on your own folder
+
+```bash
+export GROQ_API_KEY=...            # free key: https://console.groq.com/keys (never commit it)
+cd /path/to/your/project && git status   # start from a clean tree: edits are written in place
+wg ask  --live --repo . "fix the failing test in foo.py and add a regression test"
+wg chat --live --repo .            # multi-turn; edits applied only because --repo is set
+git diff                           # review what it changed; `git checkout .` to undo
+```
+
+What `--live --repo` does:
+1. gate → route → compose.
+2. The driver gets the edit format and a redacted, size-capped view of the folder.
+3. Edits are applied only if every edit resolves.
+4. The repo's tests run with `python -m pytest -q` before and after.
+5. One follow-up asks for a test file if you requested one and none was written.
+6. The tester and skeptic review the change.
+7. Unresolved items get one pass on the free mid model.
+
+Paid providers are ignored unless you pass `--allow-paid`. Local Ollama (no key): `--live --local`. Other free keys: docs/KEYS.md.
+
+Edits use `<<<REPLACE path / <<<WITH / <<<END` or `<<<FILE path … >>>`, applied only inside `--repo`.
+
+Limits on real folders today:
+- Tests are only run with `python -m pytest -q`. Other runners are not supported, and a repo without pytest tests reports a non-zero exit.
+- The model sees at most ~24 KB of the folder: the file list plus text files ≤ 8 KB each. Dotfiles and key-like files are skipped.
+- Logs go to `./.wastegate/` in the directory you run `wg` from.
+
+Status: Phase 2 (routing, skills, instincts v0, ask/run/chat with dry-run, mock and live). See docs/MISSION.md and docs/PHASE2.md.
 
 ## Honest limits
 

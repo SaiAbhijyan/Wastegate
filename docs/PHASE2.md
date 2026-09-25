@@ -100,7 +100,7 @@ Live HTTP, provider SDKs, prices, `wg proxy`, ANTHROPIC_BASE_URL, OmniRoute/Head
 
 ## wg chat
 
-A REPL. For each line: gate → route → compose (instincts injected) → driver, with the last 10 history messages. `--dry-run | --mock --replies DIR | --live [--local] [--allow-paid]`. Edits are applied only with `--repo`, using the same parser, guard, all-or-nothing rule and before/after tests as `ask`. Without `--repo` they are printed but not applied. `/route /skills /exit`. Output is redacted. One JSONL line per turn.
+A REPL. For each line: gate → route → compose (instincts injected) → driver, with the last 10 history messages. With `--repo`, the same one-shot test-file follow-up rule as `ask` applies (`run_followup`). `--dry-run | --mock --replies DIR | --live [--local] [--allow-paid]`. Edits are applied only with `--repo`, using the same parser, guard, all-or-nothing rule and before/after tests as `ask`. Without `--repo` they are printed but not applied. `/route /skills /exit`. Output is redacted. One JSONL line per turn.
 
 ## Local (Ollama)
 
