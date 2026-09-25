@@ -3,6 +3,7 @@
 Status 2026-09-25: 2a (mock + dry-run) and 2b (live adapters) are implemented. Two Groq live checks were run, N=1 each:
 - `results/20260925-live-smoke.md`: the fix passed, but the tester and skeptic replies were unparseable.
 - `results/20260925-live-smoke-2.md`: the fix passed and both contracts parsed. No test file was added.
+- `results/20260925-live-smoke-3.md`: the fix passed and a real regression test was added on the first reply. The follow-up and mid escalation were not needed, so they were not exercised live.
 
 Verified field names: docs/PROVIDERS.md.
 
@@ -31,7 +32,7 @@ If the fields are missing, the token count is `null`. We never count words or us
 
 ## `wg ask` pipeline
 
-gate → route → compose → **driver** → apply FILE blocks (path-guarded to the repo) → run repo tests (before/after exit codes) → **tester** (if routed; `TESTER: pass|fail` + `- finding` lines; failures join the unresolved list; a missing mock `tester.md` = skipped + reason) → **skeptic** (routed tier, cheaper than the driver when the route allows) → `escalate_slice(unresolved)` → JSONL log.
+gate → route → compose → **driver** → apply edits (path-guarded to the repo) → run repo tests (before/after exit codes) → **one driver follow-up** (only if the prompt asks for a test, no test file was touched, and tests were not passing from the start: "add or update a test file only; do not re-litigate the implementation unless tests still fail") → **tester** (if routed; `TESTER: pass|fail` + `- finding` lines; failures join the unresolved list; a missing mock `tester.md` = skipped + reason) → **skeptic** (routed tier, cheaper than the driver when the route allows) → `escalate_slice(unresolved)` → JSONL log.
 
 - `--dry-run`: stops after compose. Generation is empty and no provider is called.
 - `--mock --replies DIR`: `MockProvider` returns `DIR/<role>.md`. Model IDs are `mock-cheap | mock-mid`, never real IDs.
@@ -59,6 +60,18 @@ Whole-file form:
 Paths must be relative and resolve inside `--repo`. Anything else aborts the turn with no writes.
 
 Tester and skeptic output contracts (TESTER_SYSTEM / SKEPTIC_SYSTEM): the first line must be `TESTER: pass|fail` or `VERDICT: approve|reject`, followed only by `- finding` lines. The parser takes the first matching line anywhere in the reply and tolerates markdown decoration. Findings are only the `- ` lines after that line. If the line is missing, the tester counts as skipped and the skeptic as reject (fail closed), and `parse_error` notes whether max_tokens was hit and how many reasoning tokens were used. Reviewer max_tokens comes from `[router] reviewer_budget_tokens` (default 8192). On reject, the findings are the **unresolved slice**.
+
+## Skeptic scope guard
+
+The skeptic sees the original and edited files plus the test results, and is told to judge only those against the request. Findings must start with a file path. `scope_filter` drops:
+- pathless findings;
+- findings that demand unrequested extras (validation, error handling, type hints, docstrings, logging, …) when these appear in neither the prompt nor the original files.
+
+A reject whose findings are all dropped becomes `dismissed`: nothing unresolved, and the dropped findings are logged.
+
+## Mid escalation (one pass)
+
+If items are unresolved and no frontier slice exists, they go once to the `mid` model of the already key- and paid-filtered catalog, e.g. Groq `openai/gpt-oss-120b` under `--live` with only `GROQ_API_KEY`. That call uses the escalation system prompt plus the edit format and the repo context, then applies the edits and re-runs the tests. If the tests pass, the items are logged as `addressed_unverified` (they are not re-reviewed). With no mid model, the unresolved items are reported to the user as before. This never uses frontier or paid models.
 
 ## Escalation slice (`escalate.py`, a pure function)
 

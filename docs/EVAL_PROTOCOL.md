@@ -36,7 +36,7 @@ Filed 2026-09-24, before any score exists.
 
 ## Honest limits (mirrored in README)
 - No quality comparison to Fable 5.1 or Astra exists.
-- No token or $ savings have been measured. Provider adapters are wired. Two live wiring and contract checks were run (Groq, N=1 each, `results/20260925-live-smoke*.md`). Neither added the requested regression test. They are not quality or cost results.
+- No token or $ savings have been measured. Provider adapters are wired. Three live wiring and contract checks were run (Groq, N=1 each, `results/20260925-live-smoke*.md`). Only the third added the requested regression test. The follow-up and mid-escalation paths are tested with mocks only. None of this is a quality or cost result.
 - The offline heuristic gate is a keyword scorer for CI. Its confidences are not calibrated.
 - Laya and Jev adapters are request/response shapes only. Live calls are disabled. The Jev wire format is unverified against Jev.
 - Built-in skills are our paraphrases of upstream packs. Upstream licenses and SHAs are not yet verified.
