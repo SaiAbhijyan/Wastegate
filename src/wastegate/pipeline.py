@@ -233,6 +233,44 @@ def _snapshot(repo: Path, edits: list[tuple[str, str]], originals: dict) -> None
             originals[rel] = p.read_text() if p.is_file() else None
 
 
+def run_followup(prompt: str, touched: list[str], before: int, after: int, fu_p, why_fu: str, model: str,
+                 tier: str, budget: int, system: str, msgs: list[dict], repo: Path,
+                 originals: dict) -> tuple[dict, Optional[dict], int]:
+    """One-shot driver follow-up for a missing test file (shared by ask and chat).
+    msgs must end with the driver's assistant reply. Mutates `touched`/`originals`; returns (followup, call, after)."""
+    followup = {"ran": False, "reason": "", "edits": [], "error": None}
+    if not wants_test(prompt):
+        followup["reason"] = "no test requested"
+    elif any(TEST_PATH.search(e) for e in touched):
+        followup["reason"] = "driver already changed a test file"
+    elif before == 0:
+        followup["reason"] = "repo tests were passing from the start"
+    elif fu_p is None:
+        followup["reason"] = f"follow-up provider unavailable: {why_fu}"
+    else:
+        fmsgs = msgs + [{"role": "user", "content": FOLLOWUP_TEXT + f"\nRepo tests after your change: exit {after}."}]
+        fc = fu_p.complete(model, system, fmsgs, budget)
+        followup["ran"] = True
+        try:
+            fedits = parse_edits(fc.text, repo)
+        except UnsafeEdit as e:
+            followup["error"] = str(e)
+            fedits = []
+        _snapshot(repo, fedits, originals)
+        apply_edits(repo, fedits)
+        touched += [e for e, _ in fedits if e not in touched]
+        followup["edits"] = [e for e, _ in fedits]
+        if fedits:
+            after = run_tests(repo)
+        return followup, _call("driver_followup", tier, fc), after
+    return followup, None, after
+
+
+def followup_line(followup: dict, after: int) -> str:
+    return (f"follow-up (test file): edits {', '.join(followup['edits']) or '(none)'}"
+            + (f" [rejected: {followup['error']}]" if followup["error"] else "") + f"; tests after={after}")
+
+
 def _try_provider(providers, role: str, model_id: str):
     """Optional role (mock reply file may be absent): None + reason instead of an error."""
     try:
@@ -330,34 +368,13 @@ def run_ask(prompt: str, repo: Path, s1: SystemOne, catalog: Catalog, cfg: Route
     t.append(f"tests: before={before} after={after}")
 
     # 1) one follow-up when a test was requested but none was written
-    followup = {"ran": False, "reason": "", "edits": [], "error": None}
-    if not wants_test(prompt):
-        followup["reason"] = "no test requested"
-    elif any(TEST_PATH.search(e) for e in touched):
-        followup["reason"] = "driver already changed a test file"
-    elif before == 0:
-        followup["reason"] = "repo tests were passing from the start"
-    elif fu_p is None:
-        followup["reason"] = f"follow-up provider unavailable: {why_fu}"
-    else:
-        fmsgs = msgs + [{"role": "assistant", "content": drv.text},
-                        {"role": "user", "content": FOLLOWUP_TEXT + f"\nRepo tests after your change: exit {after}."}]
-        fc = fu_p.complete(r.driver.model, system, fmsgs, r.driver.budget_tokens)
-        calls.append(_call("driver_followup", r.driver.tier, fc))
-        followup["ran"] = True
-        try:
-            fedits = parse_edits(fc.text, repo)
-        except UnsafeEdit as e:
-            followup["error"] = str(e)
-            fedits = []
-        _snapshot(repo, fedits, originals)
-        apply_edits(repo, fedits)
-        touched += [e for e, _ in fedits if e not in touched]
-        followup["edits"] = [e for e, _ in fedits]
-        if fedits:
-            after = run_tests(repo)
-        t.append(f"follow-up (test file): edits {', '.join(followup['edits']) or '(none)'}"
-                 + (f" [rejected: {followup['error']}]" if followup["error"] else "") + f"; tests after={after}")
+    followup, fcall, after = run_followup(prompt, touched, before, after, fu_p, why_fu, r.driver.model,
+                                          r.driver.tier, r.driver.budget_tokens, system,
+                                          msgs + [{"role": "assistant", "content": drv.text}], repo, originals)
+    if fcall is not None:
+        calls.append(fcall)
+    if followup["ran"]:
+        t.append(followup_line(followup, after))
 
     unresolved: list[str] = []
     brief = _review_brief(prompt, originals, repo, before, after)

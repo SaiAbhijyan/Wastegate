@@ -242,6 +242,10 @@ def ask(text: str,
         out.print(f"smoke report: {p}")
 
 
+app.command("run", help="Alias of `wg ask` (same flags): one-shot routed task. "
+                         "--dry-run, --mock or --live, exactly one.")(ask)
+
+
 @app.command()
 def chat(dry_run: bool = typer.Option(False, "--dry-run", help="route + compose each turn, no generation"),
          mock: bool = typer.Option(False, "--mock", help="scripted driver reply each turn, no network"),

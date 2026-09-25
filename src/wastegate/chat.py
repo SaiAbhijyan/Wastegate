@@ -8,8 +8,8 @@ from typing import Callable, Mapping, Optional
 from .catalog import Catalog
 from .instincts import load_instincts
 from .log import TurnLogger
-from .pipeline import (ANY_EDIT, Plan, UnsafeEdit, _call, apply_edits, driver_request, parse_edits,
-                       plan_turn, run_tests)
+from .pipeline import (ANY_EDIT, Plan, UnsafeEdit, _call, _snapshot, _try_provider, apply_edits, driver_request,
+                       followup_line, parse_edits, plan_turn, run_followup, run_tests, wants_test)
 from .providers.base import Provider
 from .router import RouterConfig
 from .skills.registry import Skill
@@ -40,21 +40,25 @@ class ChatSession:
         else:
             r = plan.route
             drv_p = self.providers("driver", r.driver.model)  # resolve before any write
+            fu_p, why_fu = (_try_provider(self.providers, "driver_followup", r.driver.model) if self.repo
+                            else (None, "no --repo"))
             system, user = driver_request(plan, text, self.repo)
-            c = drv_p.complete(r.driver.model, system, self.history[-HISTORY:] + [{"role": "user", "content": user}],
-                               r.driver.budget_tokens)
-            call = _call("driver", r.driver.tier, c)
-            rec.update(calls=[call], provider=c.provider, model_id=c.model_id,
-                       tokens_in=call["tokens_in"], tokens_out=call["tokens_out"], usd=None)
+            msgs = self.history[-HISTORY:] + [{"role": "user", "content": user}]
+            c = drv_p.complete(r.driver.model, system, msgs, r.driver.budget_tokens)
+            calls = [_call("driver", r.driver.tier, c)]
             lines.append(c.text)
-            if ANY_EDIT.search(c.text):
-                lines += self._edits(c.text, rec)
             self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": c.text}]
+            if ANY_EDIT.search(c.text) or (self.repo is not None and wants_test(text)):
+                lines += self._edits(c.text, rec, text, calls, fu_p, why_fu, r, system,
+                                     msgs + [{"role": "assistant", "content": c.text}])
+            rec.update(calls=calls, provider=c.provider, model_id=c.model_id,
+                       tokens_in=_sum(calls, "tokens_in"), tokens_out=_sum(calls, "tokens_out"), usd=None)
         if self.state_dir:
             TurnLogger(self.state_dir / "logs").write(rec)
         return lines
 
-    def _edits(self, text: str, rec: dict) -> list[str]:
+    def _edits(self, text: str, rec: dict, prompt: str, calls: list, fu_p, why_fu: str, r, system: str,
+               msgs: list[dict]) -> list[str]:
         if self.repo is None:
             rec["edits"] = []
             return ["edits not applied (no --repo)"]
@@ -63,8 +67,26 @@ class ChatSession:
         except UnsafeEdit as e:
             rec["edits_error"] = str(e)
             return [f"edits rejected, nothing written: {e}"]
+        originals: dict = {}
         before = run_tests(self.repo)
+        _snapshot(self.repo, edits, originals)
         apply_edits(self.repo, edits)
+        touched = [e for e, _ in edits]
         after = run_tests(self.repo)
-        rec.update(edits=[e for e, _ in edits], tests={"before": before, "after": after})
-        return [f"edits: {', '.join(e for e, _ in edits)}", f"tests: before={before} after={after}"]
+        out = [f"edits: {', '.join(touched) or '(none)'}", f"tests: before={before} after={after}"]
+        followup, fcall, after = run_followup(prompt, touched, before, after, fu_p, why_fu, r.driver.model,
+                                              r.driver.tier, r.driver.budget_tokens, system, msgs, self.repo,
+                                              originals)
+        if fcall is not None:
+            calls.append(fcall)
+            self.history += [{"role": "user", "content": "(follow-up) add or update a test file"},
+                             {"role": "assistant", "content": f"(applied edits: {', '.join(followup['edits']) or 'none'})"}]
+        if followup["ran"]:
+            out.append(followup_line(followup, after))
+        rec.update(edits=touched, tests={"before": before, "after": after}, followup=followup)
+        return out
+
+
+def _sum(calls: list[dict], key: str):
+    vals = [c[key] for c in calls]
+    return sum(vals) if vals and all(v is not None for v in vals) else None
