@@ -21,3 +21,14 @@ def test_report_never_overwrites(tmp_path):
     a = write_smoke_report(REC, tmp_path, "20260924")
     b = write_smoke_report(REC, tmp_path, "20260924")
     assert a != b and b.name == "20260924-live-smoke-2.md" and a.exists()
+
+
+def test_report_has_host_header_and_redaction_line(tmp_path, monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-smoke-planted-2468")
+    rec = {**REC, "prompt": "p gsk-smoke-planted-2468",
+           "calls": [{**REC["calls"][0], "provider": "groq", "model_id": "openai/gpt-oss-120b"}]}
+    text = write_smoke_report(rec, tmp_path, "20260925").read_text()
+    assert "wiring check only, not a benchmark" in text
+    assert "host: api.groq.com" in text and "`openai/gpt-oss-120b`" in text
+    assert "redaction check: no configured key value present: yes" in text
+    assert "gsk-smoke-planted-2468" not in text
