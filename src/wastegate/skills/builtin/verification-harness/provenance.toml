@@ -1,0 +1,7 @@
+# Provenance for SKILL.md (kept outside SKILL.md so the user-supplied text stays byte-for-byte).
+upstream = "user-supplied (pasted in the Wastegate build session, 2026-09-25)"
+sha = "sha256 of SKILL.md; see tests/test_harness_skill.py"
+license = "MIT (declared in SKILL.md frontmatter)"
+text = "user-supplied"
+scanned = "scan.py: no injection/exfil/script findings; size 16621 B exceeds the 15000 B import cap -> explicit builtin exemption"
+credits = "Independent test design follows AgentCoder (Huang et al., arXiv:2312.13010)"
