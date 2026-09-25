@@ -48,3 +48,14 @@ def test_report_not_routed_is_na(tmp_path):
     rec = {**REC, "tester": {"status": "not routed", "findings": [], "reason": ""}, "skeptic": None}
     text = write_smoke_report(rec, tmp_path, "20260925").read_text()
     assert "- tester parsed: n/a (not routed)" in text and "- skeptic parsed: n/a (not routed)" in text
+
+
+def test_report_loop_lines(tmp_path):
+    rec = {**REC, "followup": {"ran": True, "reason": "", "edits": ["tests/test_x.py"]},
+           "mid_escalation": {"ran": False, "reason": "nothing unresolved"},
+           "skeptic": {"verdict": "reject", "effective": "dismissed", "parse_error": None,
+                       "dropped": [{"finding": "a", "reason": "no file path"}]}}
+    text = write_smoke_report(rec, tmp_path, "20260925").read_text()
+    assert "- follow-up ran: yes (edits: tests/test_x.py)" in text
+    assert "- mid escalation ran: no (nothing unresolved)" in text
+    assert "- skeptic parsed: yes (reject -> dismissed; 1 finding(s) dropped)" in text

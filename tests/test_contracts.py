@@ -93,8 +93,9 @@ def run(replies, repo, tmp_path, monkeypatch):
 def test_reasoning_preamble_replies_parse(repo, tmp_path, monkeypatch):
     r, rec = run("reasoning", repo, tmp_path, monkeypatch)
     assert rec["tester"]["status"] == "pass" and rec["tester"]["findings"] == ["tests/test_add.py covers add(2, 3)"]
-    assert rec["skeptic"]["verdict"] == "reject" and rec["skeptic"]["findings"] == ["no new regression test was added"]
-    assert rec["unresolved"] == ["no new regression test was added"]
+    assert rec["skeptic"]["verdict"] == "reject"
+    assert rec["skeptic"]["findings"] == ["tests/test_add.py: no new regression test was added"]
+    assert rec["unresolved"] == ["tests/test_add.py: no new regression test was added"]
     assert rec["tester"]["parse_error"] is None and rec["skeptic"]["parse_error"] is None
     assert rec["test_file_changed"] is False
 

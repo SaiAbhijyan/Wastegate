@@ -25,7 +25,20 @@ def _parsed(d, key: str) -> str:
         return "n/a (not routed)"
     if d.get("parse_error"):
         return f"no ({d.get(key)}: {d['parse_error']})"
-    return f"yes ({d.get(key)})"
+    extra = ""
+    if d.get("effective") and d.get("effective") != d.get(key):
+        extra += f" -> {d['effective']}"
+    if d.get("dropped"):
+        extra += f"; {len(d['dropped'])} finding(s) dropped"
+    return f"yes ({d.get(key)}{extra})"
+
+
+def _ran(d) -> str:
+    if not d:
+        return "n/a"
+    if d.get("ran"):
+        return f"yes (edits: {', '.join(d.get('edits') or []) or 'none'})"
+    return f"no ({d.get('reason', '')})"
 
 
 def write_smoke_report(record: dict, out_dir: Path, date: str) -> Path:
@@ -41,6 +54,8 @@ def write_smoke_report(record: dict, out_dir: Path, date: str) -> Path:
              f"- test file changed: {_yn(record.get('test_file_changed'))}",
              f"- tester parsed: {_parsed(record.get('tester'), 'status')}",
              f"- skeptic parsed: {_parsed(record.get('skeptic'), 'verdict')}",
+             f"- follow-up ran: {_ran(record.get('followup'))}",
+             f"- mid escalation ran: {_ran(record.get('mid_escalation'))}",
              "- usd: null (no verified price in catalog)", ""]
     for c in record.get("calls", []):
         lines += [f"## {c['role']}: {c['provider']} `{c['model_id']}` (tier {c.get('tier')})", "",

@@ -61,5 +61,8 @@ def test_reject_with_tester_fail(repo, tmp_path):
     r = run("reject", repo)
     assert r.exit_code == 0, r.output
     rec = last(tmp_path)
-    assert len(rec["unresolved"]) == 3  # 1 tester + 2 skeptic
+    # 1 tester + 1 skeptic; the skeptic's "non-numeric input" finding is unrequested scope (scope_filter)
+    assert len(rec["unresolved"]) == 2
+    assert [d["finding"] for d in rec["skeptic"]["dropped"]] == [
+        "tiny_pkg/__init__.py: add() does not handle non-numeric input"]
     assert rec["escalation"]["slice"] is None
