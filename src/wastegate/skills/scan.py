@@ -53,6 +53,16 @@ def scan_text(text: str) -> list[Finding]:
     return out
 
 
+def _user_supplied_builtin(d: Path) -> bool:
+    """Size exemption only for shipped builtins with provenance text 'user-supplied'; imports cannot self-exempt."""
+    from .registry import _sidecar_provenance, builtin_root
+    try:
+        inside = d.resolve().is_relative_to(builtin_root().resolve())
+    except OSError:
+        return False
+    return inside and _sidecar_provenance(d).get("text") == "user-supplied"
+
+
 def scan_skill_dir(d: Path) -> ScanReport:
     d = Path(d)
     findings: list[Finding] = []
@@ -62,7 +72,10 @@ def scan_skill_dir(d: Path) -> ScanReport:
     else:
         size = skill.stat().st_size
         if size > MAX_SKILL_BYTES:
-            findings.append(Finding("size", "high", f"{size} bytes > {MAX_SKILL_BYTES}"))
+            if _user_supplied_builtin(d):
+                findings.append(Finding("size", "info", f"{size} bytes > {MAX_SKILL_BYTES}: exempt (user-supplied builtin)"))
+            else:
+                findings.append(Finding("size", "high", f"{size} bytes > {MAX_SKILL_BYTES}"))
         findings += scan_text(skill.read_text(errors="replace"))
     for f in sorted(d.rglob("*")):
         if f.is_file() and f.name != "SKILL.md":

@@ -3,17 +3,21 @@ from wastegate.skills.scan import scan_skill_dir
 
 from conftest import FIXTURES
 
-EXPECTED = {"ecc", "superpowers", "ponytail", "karpathy", "feynman", "brag", "fable-mode", "caveman"}
+EXPECTED = {"ecc", "superpowers", "ponytail", "karpathy", "feynman", "brag", "fable-mode", "caveman",
+            "verification-harness"}
 
 
-def test_eight_builtins_with_provenance():
+def test_builtins_with_provenance():
     reg = load_builtin()
     assert set(reg) == EXPECTED == set(BUILTIN_IDS)
     for s in reg.values():
         p = s.provenance
-        assert p["upstream"] and p["sha"] and p["license"] and p["text"] == "paraphrase"
+        assert p["upstream"] and p["sha"] and p["license"]
         assert s.body.strip() and len(s.sha256) == 64 and not s.quarantined
-        assert len(s.body.encode()) < 15_000
+        if s.id == "verification-harness":  # user-supplied MIT text, kept byte-exact; size-exempt (scan.py)
+            assert p["text"] == "user-supplied"
+        else:
+            assert p["text"] == "paraphrase" and len(s.body.encode()) < 15_000
 
 
 def test_builtins_pass_scan():

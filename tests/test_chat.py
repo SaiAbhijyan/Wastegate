@@ -91,7 +91,7 @@ def test_history_grows_and_is_capped():
 def test_mock_with_repo_applies_replace_fail_to_pass(repo, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     d = replies(tmp_path, "Fix:\n" + FIX)
-    r = runner.invoke(app, ["chat", "--mock", "--replies", str(d), "--repo", str(repo)],
+    r = runner.invoke(app, ["chat", "--mock", "--replies", str(d), "--repo", str(repo), "--oneshot"],
                       input="fix the bug in tiny_pkg\n/exit\n")
     assert r.exit_code == 0, r.output
     assert "tests: before=1 after=0" in r.output
@@ -111,7 +111,7 @@ def test_mock_without_repo_does_not_write(repo, tmp_path, monkeypatch):
 def test_bad_edit_rejected_session_continues(repo, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     d = replies(tmp_path, f"<<<REPLACE {INIT}\nnot there\n<<<WITH\nx\n<<<END\n")
-    r = runner.invoke(app, ["chat", "--mock", "--replies", str(d), "--repo", str(repo)],
+    r = runner.invoke(app, ["chat", "--mock", "--replies", str(d), "--repo", str(repo), "--oneshot"],
                       input="one\ntwo\n/exit\n")
     assert r.exit_code == 0 and r.output.count("edits rejected, nothing written") == 2
     assert (repo / INIT).read_text().endswith("a - b\n")

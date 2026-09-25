@@ -21,6 +21,9 @@ tests_threshold = 0.5
 yagni_threshold = 0.5
 ambiguous_threshold = 0.6
 reviewer_budget_tokens = 8192   # tester/skeptic max_tokens; reasoning models need headroom for the verdict line
+
+[agent]
+max_steps = 8                   # wg chat --repo tool-loop cap
 """
 
 

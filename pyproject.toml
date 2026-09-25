@@ -27,7 +27,7 @@ wg = "wastegate.cli:app"
 where = ["src"]
 
 [tool.setuptools.package-data]
-wastegate = ["data/*.toml", "skills/builtin/*/SKILL.md"]
+wastegate = ["data/*.toml", "skills/builtin/*/SKILL.md", "skills/builtin/*/provenance.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

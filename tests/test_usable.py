@@ -64,7 +64,7 @@ def tiny(tmp_path):
 
 def chat(tmp_path, monkeypatch, repo, line, replies="followup"):
     monkeypatch.chdir(tmp_path)
-    return runner.invoke(app, ["chat", "--mock", "--replies", str(FIXTURES / "replies" / replies), "--repo", str(repo)],
+    return runner.invoke(app, ["chat", "--mock", "--replies", str(FIXTURES / "replies" / replies), "--repo", str(repo), "--oneshot"],
                          input=f"{line}\n/exit\n")
 
 

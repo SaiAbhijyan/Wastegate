@@ -19,6 +19,7 @@ from .catalog import load_catalog, mock_catalog
 from .compose import compose
 from .instincts import add_instinct, load_instincts, select_instincts
 from .chat import ChatSession, reply_lines
+from .systemone.agent_gate import agent_catalog
 from .log import TurnLogger, redact
 from .pipeline import RepoError, UnsafeEdit, run_ask, validate_repo
 from .providers.base import LiveDisabled
@@ -281,16 +282,26 @@ def chat(dry_run: bool = typer.Option(False, "--dry-run", help="route + compose 
          allow_paid: bool = typer.Option(False, "--allow-paid", help="with --live: allow paid keys/models"),
          local: bool = typer.Option(False, "--local", help="with --live: use local Ollama only"),
          replies: Optional[Path] = typer.Option(None, help="dir with driver.md (with --mock)"),
-         repo: Optional[Path] = typer.Option(None, help="apply edits here (without it, edits are shown, not written)")):
-    """Multi-turn REPL. Each line: gate -> route -> compose -> driver. /route /skills /exit."""
+         repo: Optional[Path] = typer.Option(None, help="work in this folder: tool loop (read/grep/edit/shell/pytest)"),
+         oneshot: bool = typer.Option(False, "--oneshot", help="with --repo: old one-shot edit path instead of the tool loop"),
+         max_steps: Optional[int] = typer.Option(None, "--max-steps", help="tool-loop step cap (default [agent] max_steps or 8)")):
+    """Multi-turn REPL. With --repo: System One picks model/tools, then a verified tool loop. /route /skills /exit."""
     _check_repo(repo)
     mode, catalog, providers = _resolve_mode(dry_run, mock, live, local, allow_paid, replies)
     if repo is not None:
         _check_pytest(mode)
+    agent = repo is not None and not oneshot
+    if agent:
+        try:
+            catalog = agent_catalog(catalog)
+        except LiveDisabled as e:
+            out.print(f"{mode}: {e}", markup=False)
+            raise typer.Exit(2)
     cfg = cfgmod.load()
     name = cfg.get("systemone", {}).get("backend", "heuristic")
+    steps = max_steps or int(cfg.get("agent", {}).get("max_steps", 8))
     sess = ChatSession(BACKENDS[name](), catalog, cfgmod.router_config(cfg), load_builtin(),
-                       providers, repo, STATE, mode)
+                       providers, repo, STATE, mode, agent=agent, max_steps=steps)
     out.print(f"wastegate chat ({mode}{', repo ' + str(repo) if repo else ', no repo: edits not applied'}). "
               "Commands: /route /skills /exit")
     while True:

@@ -15,6 +15,7 @@
 | `wg label new --out F [--pool P] --labeler NAME` | 3-prep | shows one unlabeled pool prompt at a time and appends the human's `kind` to JSONL; never shows a model prediction |
 | `wg review -1\|+1` / `--verdict -1\|+1 [--note]` | 4 (v0) | writes verdict onto last log line; `-1 --note` also saves an instinct |
 | `wg chat --dry-run \| --mock --replies DIR \| --live [--local] [--allow-paid] [--repo P]` | 2 | REPL; applies edits only with --repo; /route /skills /exit |
+| `wg chat --repo DIR [--mock --replies DIR \| --live \| --dry-run] [--max-steps N] [--oneshot]` | agent | tool loop (read/grep/edit/shell/pytest) + verification gate; see docs/AGENT.md |
 | `wg ask … --live --local` | 2 | local Ollama, keyless; down → exit 2 |
 | `wg run …` | 2 | alias of `wg ask` (same flags) |
 | `wg feedback`, `evolve`, `report`, `proxy` | 3–5 | stub, exit 2 (`feedback`, `proxy` not registered) |

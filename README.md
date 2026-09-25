@@ -79,7 +79,21 @@ git diff
 
 `wg chat --live --repo .` does the same thing turn by turn.
 
-What `--live --repo` does:
+### 3. Agent loop: `wg chat --repo` (tool loop + verification gate)
+
+`wg chat --repo DIR` runs a tool loop. System One picks the model (from your live catalog), the tools, `max_steps` (default 8), and whether the verification harness loads. The model then works one action at a time: read, grep, edit, shell (allowlist) or pytest. It can't call the work done without a fresh passing test run after its last edit, and every turn ends with `VERIFICATION: PASS | NOT VERIFIED` and a `Checks:` line. Details: docs/AGENT.md.
+
+Offline, no key:
+
+```bash
+cp -r tests/fixtures/off_by_one /tmp/obo
+printf 'fix the off-by-one in sliding_windows\n/exit\n' | wg chat --mock --replies tests/fixtures/replies/agent_obo --repo /tmp/obo
+wg chat --dry-run --repo /tmp/obo          # shows the model/tools/harness picks, no generation
+```
+
+Live: `wg chat --live --repo .` (Groq, OpenRouter `:free`, or `--local` Ollama). `--oneshot` keeps the older single-reply edit path.
+
+What `wg ask --live --repo` does:
 1. gate → route → compose.
 2. The driver gets the edit format and a redacted, size-capped view of the folder.
 3. Edits are applied only if every edit resolves.
@@ -104,6 +118,7 @@ A failing test suite is not an error: it is the before/after signal.
 - **Heuristic gate.** Routing (task kind, complexity, which tier) comes from an offline keyword scorer. It is not calibrated, and Laya and Jev are not wired live.
 - **Free models, not frontier.** `--live` uses free-tier models (e.g. Groq `openai/gpt-oss-120b`/`-20b`). No frontier model is ever called, and nothing here claims frontier-level quality.
 - Edits are written in place inside `--repo`. Use git to review and undo them.
+- The agent loop's shell allowlist is not a sandbox: `python <file>.py` runs arbitrary code from that file. The tamper check is line-level, not a proof. When loaded, the harness skill adds ~16.6 KB to every step's prompt. The agent loop has only been run with mocks so far.
 - Logs go to `./.wastegate/` in the directory you run `wg` from.
 
 Status: Phase 2 (routing, skills, instincts v0, ask/run/chat with dry-run, mock and live). See docs/MISSION.md and docs/PHASE2.md.

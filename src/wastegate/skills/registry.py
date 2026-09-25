@@ -10,7 +10,8 @@ import yaml
 
 from ..systemone.base import SKILL_IDS
 
-BUILTIN_IDS = SKILL_IDS
+# verification-harness is loaded conditionally by the agent loop; it is not a gate skill_primary option.
+BUILTIN_IDS = SKILL_IDS + ("verification-harness",)
 
 
 @dataclass(frozen=True)
@@ -36,10 +37,17 @@ def parse_skill(path: Path) -> tuple[dict, str]:
     return meta, body
 
 
+def _sidecar_provenance(d: Path) -> dict:
+    """provenance.toml next to SKILL.md (used when SKILL.md must stay byte-exact, e.g. user-supplied text)."""
+    from ..catalog import tomllib
+    p = d / "provenance.toml"
+    return tomllib.loads(p.read_text()) if p.is_file() else {}
+
+
 def load_skill_dir(d: Path, imported: bool = False) -> Skill:
     p = Path(d) / "SKILL.md"
     meta, body = parse_skill(p)
-    prov = meta.get("provenance") or {}
+    prov = meta.get("provenance") or _sidecar_provenance(Path(d))
     if imported:
         prov = {"upstream": prov.get("upstream", "unknown"), "sha": prov.get("sha", "unknown"),
                 "license": prov.get("license", "unknown"), "text": "vendored", "scanned": "pending"}

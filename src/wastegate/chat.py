@@ -7,7 +7,9 @@ from typing import Callable, Mapping, Optional
 
 from .catalog import Catalog
 from .instincts import load_instincts
+from .agent import build_system, run_agent, verification_lines
 from .log import TurnLogger
+from .systemone.agent_gate import agent_plan
 from .pipeline import (ANY_EDIT, Plan, UnsafeEdit, _call, cap_text, _snapshot, _try_provider, apply_edits, driver_request,
                        followup_line, parse_edits, plan_turn, run_followup, run_tests, wants_test)
 from .providers.base import Provider
@@ -28,9 +30,10 @@ def reply_lines(driver_text):
 class ChatSession:
     def __init__(self, s1: SystemOne, catalog: Catalog, cfg: RouterConfig, registry: Mapping[str, Skill],
                  providers: Optional[Callable[[str, Optional[str]], Provider]], repo: Optional[Path],
-                 state_dir: Optional[Path], mode: str):
+                 state_dir: Optional[Path], mode: str, agent: bool = False, max_steps: int = 8):
         self.s1, self.catalog, self.cfg, self.registry = s1, catalog, cfg, registry
         self.providers, self.repo, self.state_dir, self.mode = providers, repo, state_dir, mode
+        self.agent, self.max_steps = agent and repo is not None, max_steps
         self.history: list[dict] = []
         self.last: Optional[Plan] = None
         self.n = 0
@@ -40,6 +43,8 @@ class ChatSession:
         rows = load_instincts(self.state_dir) if self.state_dir else []
         plan = plan_turn(text, self.s1, self.catalog, self.cfg, self.registry, rows)
         self.last = plan
+        if self.agent:
+            return self._agent_turn(text, plan)
         lines = list(plan.transcript)
         rec = {**plan.record, "mode": f"chat-{self.mode}", "turn": self.n, "driver_text": None}
         if self.providers is None:
@@ -61,6 +66,30 @@ class ChatSession:
                                      msgs + [{"role": "assistant", "content": c.text}])
             rec.update(calls=calls, provider=c.provider, model_id=c.model_id,
                        tokens_in=_sum(calls, "tokens_in"), tokens_out=_sum(calls, "tokens_out"), usd=None)
+        if self.state_dir:
+            TurnLogger(self.state_dir / "logs").write(rec)
+        return lines
+
+    def _agent_turn(self, text: str, plan: Plan) -> list[str]:
+        ap = agent_plan(text, self.s1, self.catalog, self.cfg, max_steps=self.max_steps, gate=plan.gate)
+        picks = (f"agent: model={ap.model_id} tools={','.join(ap.tools)} max_steps={ap.max_steps} "
+                 f"harness={'on' if ap.harness else 'off'} tool_loop={ap.answers['tool_loop']['value']:.2f}")
+        rec = {**plan.record, "mode": f"chat-agent-{self.mode}", "turn": self.n, "driver_text": None,
+               "agent": {"model_id": ap.model_id, "tools": list(ap.tools), "max_steps": ap.max_steps,
+                         "harness": ap.harness, "answers": ap.answers}}
+        if self.providers is None:
+            lines = reply_lines(None) + list(plan.transcript) + [picks, "generation: (empty, dry-run)"]
+        else:
+            system = build_system(plan.composed.system, ap, self.repo)
+            res = run_agent(text, self.repo, ap, self.providers, system, plan.route.driver.budget_tokens,
+                            history=self.history[-HISTORY:], tier=plan.route.driver.tier)
+            lines = (res.step_lines + reply_lines(cap_text(res.final_text, limit=None)) + list(plan.transcript)
+                     + [picks] + verification_lines(res.verification))
+            rec.update(tool_calls=res.tool_calls, calls=res.calls, verification=res.verification,
+                       stop_reason=res.stop_reason, driver_text=cap_text(res.final_text),
+                       provider=res.calls[0]["provider"] if res.calls else None, model_id=ap.model_id,
+                       tokens_in=_sum(res.calls, "tokens_in"), tokens_out=_sum(res.calls, "tokens_out"), usd=None)
+            self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": res.final_text}]
         if self.state_dir:
             TurnLogger(self.state_dir / "logs").write(rec)
         return lines
