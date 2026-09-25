@@ -17,6 +17,7 @@ from . import config as cfgmod
 from .catalog import load_catalog, mock_catalog
 from .compose import compose
 from .instincts import add_instinct, load_instincts, select_instincts
+from .chat import ChatSession
 from .log import TurnLogger, redact
 from .pipeline import UnsafeEdit, run_ask
 from .providers.base import LiveDisabled
@@ -180,16 +181,9 @@ def _stub(phase: str):
     raise typer.Exit(2)
 
 
-@app.command()
-def ask(text: str,
-        dry_run: bool = typer.Option(False, "--dry-run", help="route + compose, no generation"),
-        mock: bool = typer.Option(False, "--mock", help="scripted replies, no network"),
-        live: bool = typer.Option(False, "--live", help="allow network; needs the provider key in env"),
-        allow_paid: bool = typer.Option(False, "--allow-paid", help="with --live: allow paid keys/models (or ALLOW_PAID=1)"),
-        local: bool = typer.Option(False, "--local", help="with --live: use local Ollama only (no key)"),
-        replies: Optional[Path] = typer.Option(None, help="dir with <role>.md replies (with --mock)"),
-        repo: Path = typer.Option(Path("."), help="repo the driver edits and tests run in")):
-    """One-shot routed task: --dry-run, --mock, or --live (exactly one)."""
+def _resolve_mode(dry_run: bool, mock: bool, live: bool, local: bool, allow_paid: bool,
+                  replies: Optional[Path]):
+    """-> (mode, catalog, providers). Exits 2 on bad combos or when live has nothing usable."""
     modes = [m for m, on in (("dry-run", dry_run), ("mock", mock), ("live", live)) if on]
     if len(modes) > 1:
         out.print("choose one of --dry-run / --mock / --live")
@@ -204,8 +198,6 @@ def ask(text: str,
     if mode == "mock" and replies is None:
         out.print("--mock needs --replies DIR")
         raise typer.Exit(2)
-    cfg = cfgmod.load()
-    name = cfg.get("systemone", {}).get("backend", "heuristic")
     try:
         catalog = {"mock": mock_catalog, "dry-run": cloud_catalog,
                    "live": lambda: live_catalog(load_catalog(), allow_paid=allow_paid, local=local)}[mode]()
@@ -214,6 +206,22 @@ def ask(text: str,
         raise typer.Exit(2)
     providers = {"dry-run": None, "mock": mock_providers(replies) if replies else None,
                  "live": live_providers(catalog, allow_network=True, allow_paid=allow_paid)}[mode]
+    return mode, catalog, providers
+
+
+@app.command()
+def ask(text: str,
+        dry_run: bool = typer.Option(False, "--dry-run", help="route + compose, no generation"),
+        mock: bool = typer.Option(False, "--mock", help="scripted replies, no network"),
+        live: bool = typer.Option(False, "--live", help="allow network; needs the provider key in env"),
+        allow_paid: bool = typer.Option(False, "--allow-paid", help="with --live: allow paid keys/models (or ALLOW_PAID=1)"),
+        local: bool = typer.Option(False, "--local", help="with --live: use local Ollama only (no key)"),
+        replies: Optional[Path] = typer.Option(None, help="dir with <role>.md replies (with --mock)"),
+        repo: Path = typer.Option(Path("."), help="repo the driver edits and tests run in")):
+    """One-shot routed task: --dry-run, --mock, or --live (exactly one)."""
+    mode, catalog, providers = _resolve_mode(dry_run, mock, live, local, allow_paid, replies)
+    cfg = cfgmod.load()
+    name = cfg.get("systemone", {}).get("backend", "heuristic")
     try:
         res = run_ask(text, repo, BACKENDS[name](), catalog, cfgmod.router_config(cfg), load_builtin(),
                       mode=mode, providers=providers, instincts=load_instincts(STATE))
@@ -224,7 +232,7 @@ def ask(text: str,
         out.print(f"aborted, no edits written: {e}")
         raise typer.Exit(1)
     except urllib.error.URLError as e:  # live only; may fire after edits were applied
-        out.print(f"provider error (edits may already be applied in {repo}): {e}")
+        out.print(f"provider error (edits may already be applied in {repo}): {redact(str(e))}")
         raise typer.Exit(1)
     TurnLogger(Path(".wastegate/logs")).write(res.record)
     for line in res.transcript:
@@ -235,9 +243,59 @@ def ask(text: str,
 
 
 @app.command()
-def chat():
-    """Multi-turn (Phase 2)."""
-    _stub("Phase 2")
+def chat(dry_run: bool = typer.Option(False, "--dry-run", help="route + compose each turn, no generation"),
+         mock: bool = typer.Option(False, "--mock", help="scripted driver reply each turn, no network"),
+         live: bool = typer.Option(False, "--live", help="allow network; needs the provider key in env"),
+         allow_paid: bool = typer.Option(False, "--allow-paid", help="with --live: allow paid keys/models"),
+         local: bool = typer.Option(False, "--local", help="with --live: use local Ollama only"),
+         replies: Optional[Path] = typer.Option(None, help="dir with driver.md (with --mock)"),
+         repo: Optional[Path] = typer.Option(None, help="apply edits here (without it, edits are shown, not written)")):
+    """Multi-turn REPL. Each line: gate -> route -> compose -> driver. /route /skills /exit."""
+    mode, catalog, providers = _resolve_mode(dry_run, mock, live, local, allow_paid, replies)
+    cfg = cfgmod.load()
+    name = cfg.get("systemone", {}).get("backend", "heuristic")
+    sess = ChatSession(BACKENDS[name](), catalog, cfgmod.router_config(cfg), load_builtin(),
+                       providers, repo, STATE, mode)
+    out.print(f"wastegate chat ({mode}{', repo ' + str(repo) if repo else ', no repo: edits not applied'}). "
+              "Commands: /route /skills /exit")
+    while True:
+        try:
+            line = input("wg> ").strip()
+        except EOFError:
+            break
+        if not line:
+            continue
+        if line in ("/exit", "/quit"):
+            break
+        if line == "/route":
+            if sess.last is None:
+                out.print("no turn yet")
+            else:
+                r = sess.last.route
+                out.print(f"driver: {r.driver.tier} {r.driver.model}", markup=False)
+                for s in r.specialists:
+                    out.print(f"  + {s.role}: {s.tier} {s.model}", markup=False)
+            continue
+        if line == "/skills":
+            if sess.last is None:
+                out.print("no turn yet")
+            else:
+                c = sess.last.composed
+                out.print(f"skills: {', '.join(c.included)}; instincts: {len(c.instincts)}", markup=False)
+            continue
+        if line.startswith("/"):
+            out.print("commands: /route /skills /exit")
+            continue
+        try:
+            lines = sess.turn(line)
+        except (LiveDisabled, NotImplementedError, FileNotFoundError) as e:
+            out.print(f"{mode}: {redact(str(e))}", markup=False)
+            continue
+        except urllib.error.URLError as e:
+            out.print(f"provider error: {redact(str(e))}", markup=False)
+            continue
+        for l in lines:
+            out.print(redact(l), markup=False)
 
 
 @app.command(context_settings={"ignore_unknown_options": True})
