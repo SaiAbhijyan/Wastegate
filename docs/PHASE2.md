@@ -1,6 +1,10 @@
 # PHASE 2: generation contract
 
-Status 2026-09-25: 2a (mock + dry-run) and 2b (live adapters) are implemented. First live wiring check passed on Groq (N=1, results/20260925-live-smoke.md). The driver fixed `add()`, but the tester and skeptic replies did not follow the required format. Verified field names: docs/PROVIDERS.md.
+Status 2026-09-25: 2a (mock + dry-run) and 2b (live adapters) are implemented. Two Groq live checks were run, N=1 each:
+- `results/20260925-live-smoke.md`: the fix passed, but the tester and skeptic replies were unparseable.
+- `results/20260925-live-smoke-2.md`: the fix passed and both contracts parsed. No test file was added.
+
+Verified field names: docs/PROVIDERS.md.
 
 ## Provider fabric (one interface)
 
@@ -54,7 +58,7 @@ Whole-file form:
 
 Paths must be relative and resolve inside `--repo`. Anything else aborts the turn with no writes.
 
-Skeptic reply format: a first line `VERDICT: approve|reject`, then `- finding` lines. On reject, the findings are the **unresolved slice**.
+Tester and skeptic output contracts (TESTER_SYSTEM / SKEPTIC_SYSTEM): the first line must be `TESTER: pass|fail` or `VERDICT: approve|reject`, followed only by `- finding` lines. The parser takes the first matching line anywhere in the reply and tolerates markdown decoration. Findings are only the `- ` lines after that line. If the line is missing, the tester counts as skipped and the skeptic as reject (fail closed), and `parse_error` notes whether max_tokens was hit and how many reasoning tokens were used. Reviewer max_tokens comes from `[router] reviewer_budget_tokens` (default 8192). On reject, the findings are the **unresolved slice**.
 
 ## Escalation slice (`escalate.py`, a pure function)
 
