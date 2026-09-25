@@ -28,7 +28,23 @@ def test_report_has_host_header_and_redaction_line(tmp_path, monkeypatch):
     rec = {**REC, "prompt": "p gsk-smoke-planted-2468",
            "calls": [{**REC["calls"][0], "provider": "groq", "model_id": "openai/gpt-oss-120b"}]}
     text = write_smoke_report(rec, tmp_path, "20260925").read_text()
-    assert "wiring check only, not a benchmark" in text
+    assert "wiring + contract check, not a benchmark" in text
     assert "host: api.groq.com" in text and "`openai/gpt-oss-120b`" in text
     assert "redaction check: no configured key value present: yes" in text
     assert "gsk-smoke-planted-2468" not in text
+
+
+def test_report_contract_lines(tmp_path):
+    rec = {**REC, "test_file_changed": True,
+           "tester": {"status": "skipped", "parse_error": "no TESTER: line in reply"},
+           "skeptic": {"verdict": "approve", "parse_error": None}}
+    text = write_smoke_report(rec, tmp_path, "20260925").read_text()
+    assert "- test file changed: yes" in text
+    assert "- tester parsed: no (skipped: no TESTER: line in reply)" in text
+    assert "- skeptic parsed: yes (approve)" in text
+
+
+def test_report_not_routed_is_na(tmp_path):
+    rec = {**REC, "tester": {"status": "not routed", "findings": [], "reason": ""}, "skeptic": None}
+    text = write_smoke_report(rec, tmp_path, "20260925").read_text()
+    assert "- tester parsed: n/a (not routed)" in text and "- skeptic parsed: n/a (not routed)" in text

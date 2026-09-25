@@ -16,6 +16,18 @@ def _host(provider: str) -> str:
     return urlparse(cls.url).netloc if cls is not None and getattr(cls, "url", "") else "n/a"
 
 
+def _yn(v) -> str:
+    return "n/a" if v is None else ("yes" if v else "no")
+
+
+def _parsed(d, key: str) -> str:
+    if not d or d.get(key) in (None, "not routed"):
+        return "n/a (not routed)"
+    if d.get("parse_error"):
+        return f"no ({d.get(key)}: {d['parse_error']})"
+    return f"yes ({d.get(key)})"
+
+
 def write_smoke_report(record: dict, out_dir: Path, date: str) -> Path:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -23,9 +35,12 @@ def write_smoke_report(record: dict, out_dir: Path, date: str) -> Path:
     while p.exists():
         p, n = out_dir / f"{date}-live-smoke-{n}.md", n + 1
     lines = [f"# {date} live smoke", "",
-             "**wiring check only, not a benchmark.** One `wg ask --live` invocation; not a quality claim.", "",
+             "**wiring + contract check, not a benchmark.** One `wg ask --live` invocation; not a quality claim.", "",
              f"- prompt: {record.get('prompt')}",
              f"- tests: {json.dumps(record.get('tests'))}",
+             f"- test file changed: {_yn(record.get('test_file_changed'))}",
+             f"- tester parsed: {_parsed(record.get('tester'), 'status')}",
+             f"- skeptic parsed: {_parsed(record.get('skeptic'), 'verdict')}",
              "- usd: null (no verified price in catalog)", ""]
     for c in record.get("calls", []):
         lines += [f"## {c['role']}: {c['provider']} `{c['model_id']}` (tier {c.get('tier')})", "",

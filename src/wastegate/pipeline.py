@@ -34,8 +34,25 @@ full file contents
 """
 CONTEXT_SKIP_DIRS = {".git", ".wastegate", "__pycache__", ".venv", "venv", "node_modules", ".pytest_cache", "results"}
 CONTEXT_SKIP_NAMES = re.compile(r"^(\..*|id_rsa.*|id_ed25519.*|.*\.(pem|key|p12|pfx)|credentials.*|secrets?\..*)$")
-TESTER = re.compile(r"^\s*TESTER:\s*(pass|fail)\s*$", re.IGNORECASE | re.MULTILINE)
-VERDICT = re.compile(r"^\s*VERDICT:\s*(approve|reject)\s*$", re.IGNORECASE | re.MULTILINE)
+def _contract(word: str, choices: str) -> re.Pattern:
+    # Tolerates markdown decoration (**, `, _) and a trailing period; first matching line wins.
+    return re.compile(rf"^[ \t]*[*`_]*[ \t]*{word}:[ \t]*[*`_]*[ \t]*({choices})\b[*`_. \t]*$",
+                      re.IGNORECASE | re.MULTILINE)
+
+
+TESTER = _contract("TESTER", "pass|fail")
+VERDICT = _contract("VERDICT", "approve|reject")
+TESTER_SYSTEM = ("Role: tester.\n"
+                 "Output contract: the first line of your reply must be exactly `TESTER: pass` or `TESTER: fail`.\n"
+                 "After it, only lines starting with `- ` (one finding each). No preamble, no markdown, no other text.")
+SKEPTIC_SYSTEM = ("Role: skeptic. Try to refute the change.\n"
+                  "Output contract: the first line of your reply must be exactly `VERDICT: approve` or `VERDICT: reject`.\n"
+                  "After it, only lines starting with `- ` (one finding each). No preamble, no markdown, no other text.")
+TEST_INSTRUCTION = ("The user asked for a test: add or update a test file (e.g. under tests/) that fails before "
+                    "your fix and passes after; do not only patch the implementation.\n")
+WANTS_TEST = re.compile(r"\bregression tests?\b|\b(add|write|with|include|create)\b[^.\n]{0,40}\btests?\b",
+                        re.IGNORECASE)
+TEST_PATH = re.compile(r"(^|/)(tests?/|test_[^/]*\.py$|[^/]*_test\.py$)")
 
 
 class UnsafeEdit(Exception):
@@ -123,14 +140,24 @@ def _findings(text: str) -> list[str]:
     return [l.strip()[2:] for l in text.splitlines() if l.strip().startswith("- ")]
 
 
+def _parse_contract(pat: re.Pattern, text: str) -> tuple[str, list[str]]:
+    """First contract line anywhere in the reply; findings are the `- ` lines after it only."""
+    m = pat.search(text)
+    if not m:
+        return "invalid", []
+    return m.group(1).lower(), _findings(text[m.end():])
+
+
 def parse_skeptic(text: str) -> tuple[str, list[str]]:
-    m = VERDICT.search(text)
-    return (m.group(1).lower() if m else "invalid"), _findings(text)
+    return _parse_contract(VERDICT, text)
 
 
 def parse_tester(text: str) -> tuple[str, list[str]]:
-    m = TESTER.search(text)
-    return (m.group(1).lower() if m else "invalid"), _findings(text)
+    return _parse_contract(TESTER, text)
+
+
+def wants_test(prompt: str) -> bool:
+    return bool(WANTS_TEST.search(prompt))
 
 
 def run_tests(repo: Path) -> int:
@@ -145,10 +172,26 @@ def run_tests(repo: Path) -> int:
 
 def _call(role: str, tier: str, c: Completion) -> dict:
     u = c.usage
+    raw_usage = (c.raw or {}).get("usage")
+    reasoning = ((raw_usage or {}).get("completion_tokens_details") or {}).get("reasoning_tokens")
     # usd stays None: no catalog price is verified (docs/PHASE2.md).
     return {"role": role, "tier": tier, "provider": c.provider, "model_id": c.model_id,
             "tokens_in": u.input_tokens if u else None, "tokens_out": u.output_tokens if u else None,
-            "usd": None, "usage_raw": (c.raw or {}).get("usage")}
+            "reasoning_tokens": reasoning, "usd": None, "usage_raw": raw_usage}
+
+
+def _parse_error(label: str, call: dict, budget: int) -> str:
+    msg = f"no {label}: line in reply"
+    if call["tokens_out"] is not None and call["tokens_out"] >= budget:
+        msg += f" (hit max_tokens={budget}; reasoning_tokens={call['reasoning_tokens']})"
+    return msg
+
+
+def _review_brief(prompt: str, edits: list[tuple[str, str]], before: int, after: int, cap: int = 6_000) -> str:
+    from .log import redact
+    body = "".join(f"<file path=\"{rel}\">\n{text}</file>\n" for rel, text in edits)
+    return redact(f"Task: {prompt}\nEdited files after the change:\n{body[:cap]}\n"
+                  f"Repo tests exit code: before={before} after={after} (0 = pass)\n")
 
 
 def _total(calls: list[dict], key: str):
@@ -190,7 +233,8 @@ def driver_request(plan: Plan, prompt: str, repo: Optional[Path]) -> tuple[str, 
     """(system, user) for the driver. With a repo: edit format + repo context."""
     if repo is None:
         return plan.composed.system, prompt
-    return plan.composed.system + "\n" + EDIT_FORMAT, prompt + "\n\n" + repo_context(repo)
+    system = plan.composed.system + "\n" + EDIT_FORMAT + (TEST_INSTRUCTION if wants_test(prompt) else "")
+    return system, prompt + "\n\n" + repo_context(repo)
 
 
 def run_ask(prompt: str, repo: Path, s1: SystemOne, catalog: Catalog, cfg: RouterConfig,
@@ -230,29 +274,41 @@ def run_ask(prompt: str, repo: Path, s1: SystemOne, catalog: Catalog, cfg: Route
     t.append(f"tests: before={before} after={after}")
 
     unresolved: list[str] = []
+    brief = _review_brief(prompt, edits, before, after)
     if ts_p is not None:
-        tmsg = [{"role": "user", "content": f"Task: {prompt}\nEdits: {[e for e, _ in edits]}\n"
-                                            f"Tests before={before} after={after}\nReply TESTER: pass|fail."}]
-        tc = ts_p.complete(ts.model, "Role: tester.", tmsg, ts.budget_tokens)
-        calls.append(_call("tester", ts.tier, tc))
+        tc = ts_p.complete(ts.model, TESTER_SYSTEM, [{"role": "user", "content": brief + "Reply per the contract."}],
+                           ts.budget_tokens)
+        tcall = _call("tester", ts.tier, tc)
+        calls.append(tcall)
         status, tf = parse_tester(tc.text)
-        tester = {"status": status, "findings": tf, "reason": ""}
-        if status != "pass":
-            unresolved += tf or [f"tester reply {status}"]
-        t.append(f"tester ({ts.tier} {ts.model}): {status}" + "".join(f"\n  - {f}" for f in tf))
+        if status == "invalid":  # contract missed: skip, do not guess
+            tester = {"status": "skipped", "findings": [], "reason": "",
+                      "parse_error": _parse_error("TESTER", tcall, ts.budget_tokens)}
+        else:
+            tester = {"status": status, "findings": tf, "reason": "", "parse_error": None}
+            if status == "fail":
+                unresolved += tf or ["tester reported fail without findings"]
+        t.append(f"tester ({ts.tier} {ts.model}): {tester['status']}"
+                 + (f" [{tester['parse_error']}]" if tester["parse_error"] else "")
+                 + "".join(f"\n  - {f}" for f in tester["findings"]))
     elif ts is not None:
+        tester["parse_error"] = None
         t.append(f"tester: {tester['status']} ({tester['reason']})")
 
-    verdict, findings = None, []
+    verdict, findings, sk_err = None, [], None
     if sk is not None:
-        review_msg = [{"role": "user", "content": f"Task: {prompt}\nEdits: {[e for e, _ in edits]}\n"
-                                                  f"Tests before={before} after={after}\nRefute or approve."}]
-        skc = sk_p.complete(sk.model, "Role: skeptic.", review_msg, sk.budget_tokens)
-        calls.append(_call("skeptic", sk.tier, skc))
+        skc = sk_p.complete(sk.model, SKEPTIC_SYSTEM, [{"role": "user", "content": brief + "Reply per the contract."}],
+                            sk.budget_tokens)
+        scall = _call("skeptic", sk.tier, skc)
+        calls.append(scall)
         verdict, findings = parse_skeptic(skc.text)
-        if verdict != "approve":
-            unresolved += findings or ["skeptic reply unparseable"]
-        t.append(f"skeptic ({sk.tier} {sk.model}): {verdict}" + "".join(f"\n  - {f}" for f in findings))
+        if verdict == "invalid":  # contract missed: fail closed
+            verdict, sk_err = "reject", _parse_error("VERDICT", scall, sk.budget_tokens)
+            unresolved.append(f"skeptic reply unparseable ({sk_err})")
+        elif verdict == "reject":
+            unresolved += findings or ["skeptic rejected without findings"]
+        t.append(f"skeptic ({sk.tier} {sk.model}): {verdict}" + (f" [{sk_err}]" if sk_err else "")
+                 + "".join(f"\n  - {f}" for f in findings))
     if after != 0:
         unresolved.append(f"tests still failing (exit {after})")
 
@@ -265,7 +321,9 @@ def run_ask(prompt: str, repo: Path, s1: SystemOne, catalog: Catalog, cfg: Route
         calls=calls, provider=drv.provider, model_id=drv.model_id,
         tokens_in=_total(calls, "tokens_in"), tokens_out=_total(calls, "tokens_out"), usd=_total(calls, "usd"),
         edits=[e for e, _ in edits], tests={"before": before, "after": after},
-        tester=tester, skeptic={"verdict": verdict, "findings": findings}, unresolved=unresolved,
+        test_file_changed=any(TEST_PATH.search(e) for e, _ in edits),
+        tester=tester, skeptic={"verdict": verdict, "findings": findings, "parse_error": sk_err},
+        unresolved=unresolved,
         escalation={"slice": asdict(sl) if sl else None, "reason": why})
     t.append(f"tokens in/out: {out.record['tokens_in']}/{out.record['tokens_out']} (provider-reported; null if any call lacked usage); usd: null (no verified price)")
     return out

@@ -25,6 +25,9 @@ class RouterConfig:
     tests_threshold: float = 0.5
     yagni_threshold: float = 0.5
     ambiguous_threshold: float = 0.6
+    # Tester/skeptic max_tokens. Reasoning models spend completion tokens before the visible verdict,
+    # so this must leave room for reasoning + the contract line (4000 truncated a Groq gpt-oss-20b skeptic).
+    reviewer_budget_tokens: int = 8_192
 
 
 @dataclass(frozen=True)
@@ -91,9 +94,9 @@ def route(gate: Mapping[str, Answer], catalog: Catalog, cfg: RouterConfig) -> Ro
     if LEVELS.index(cx) >= LEVELS.index("feature"):
         cheapest = min(have, key=TIERS.index)
         sk_tier = cheapest if TIERS.index(cheapest) <= TIERS.index(driver.tier) else driver.tier
-        specs.append(expert("skeptic", sk_tier, ("fable-mode", "caveman"), 4_000))
+        specs.append(expert("skeptic", sk_tier, ("fable-mode", "caveman"), cfg.reviewer_budget_tokens))
     if _p(gate["needs_tests"]) >= cfg.tests_threshold:
-        specs.append(expert("tester", driver.tier, ("superpowers", "caveman"), 4_000))
+        specs.append(expert("tester", driver.tier, ("superpowers", "caveman"), cfg.reviewer_budget_tokens))
     if kind == "research" or domain == "research":
         specs.append(expert("researcher", driver.tier, ("feynman", "caveman"), 8_000))
     if kind == "ship":
