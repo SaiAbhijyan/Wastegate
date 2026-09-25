@@ -2,55 +2,108 @@
 
 Cheap until it isn't. A System-One gated coding CLI: cheap models first, Fable/Astra only when the gate opens. Skills, MoE-style routing (role × skill × model tier), measured token spend.
 
+## Install
+
+### Windows (Anaconda / Miniconda, PowerShell or Anaconda Prompt)
+
+```powershell
+conda create -n wastegate python=3.11 -y
+conda activate wastegate
+git clone https://github.com/SaiAbhijyan/Wastegate
+cd Wastegate
+git checkout claude/serene-johnson-1o0d5w
+pip install -e ".[dev]"
+wg --help
+wg init
+```
+
+### macOS / Linux
+
+```bash
+python3.11 -m venv .venv && source .venv/bin/activate      # or conda, as above
+git clone https://github.com/SaiAbhijyan/Wastegate && cd Wastegate
+git checkout claude/serene-johnson-1o0d5w
+pip install -e ".[dev]"
+wg --help
+wg init
+```
+
+`wg init` writes `~/.wastegate/config.toml`. It needs no API key. `git checkout claude/serene-johnson-1o0d5w` is needed until this branch is merged into `main`.
+
 ## Quickstart
 
-Install (Python ≥ 3.10):
+### 1. Offline, no key: fix a real off-by-one with scripted replies
 
-```bash
-git clone https://github.com/SaiAbhijyan/Wastegate && cd Wastegate
-pip install -e '.[dev]'
+Windows (PowerShell):
+
+```powershell
+Copy-Item -Recurse tests\fixtures\off_by_one $env:TEMP\obo
+wg ask --mock --replies tests\fixtures\replies\off_by_one --repo $env:TEMP\obo "fix the off-by-one in sliding_windows"
 ```
 
-### Zero-key (works offline)
+macOS / Linux:
 
 ```bash
-wg route  "fix the off-by-one in sliding_windows"     # gate + expert mix, no LLM
-wg prompt "fix the off-by-one in sliding_windows"     # composed system prompt (skills + instincts)
-wg chat --dry-run                                      # REPL: /route /skills /exit
-
-cp -r tests/fixtures/off_by_one /tmp/obo               # a real off-by-one with a failing test
+cp -r tests/fixtures/off_by_one /tmp/obo
 wg ask --mock --replies tests/fixtures/replies/off_by_one --repo /tmp/obo "fix the off-by-one in sliding_windows"
-wg review -1 --note "prefer stdlib over new deps"      # saves an instinct for later turns
 ```
 
-`wg run` is an alias of `wg ask` (same flags).
+Expected output includes `edits: windows/__init__.py` and `tests: before=1 after=0`.
 
-### Free live model on your own folder
+Other zero-key commands: `wg route "…"`, `wg prompt "…"`, `wg chat --dry-run` (`/route /skills /exit`), and `wg review -1 --note "prefer stdlib"` (saves an instinct for later turns). `wg run` is an alias of `wg ask`.
+
+### 2. A free live model on your own folder
+
+Get a free Groq key at https://console.groq.com/keys. Set it **only as an environment variable** in your own terminal.
+
+**Never paste keys into chat, issues, or code, and never commit them.** Wastegate reads keys from the environment and redacts them from its logs.
+
+Windows (PowerShell; applies to this terminal session only):
+
+```powershell
+$env:GROQ_API_KEY = "<your key>"
+cd C:\path\to\your\project
+git status                      # start from a clean tree: edits are written in place
+wg ask --live --repo . "fix the failing test in foo.py and add a regression test"
+git diff                        # review; `git checkout .` to undo
+```
+
+macOS / Linux:
 
 ```bash
-export GROQ_API_KEY=...            # free key: https://console.groq.com/keys (never commit it)
-cd /path/to/your/project && git status   # start from a clean tree: edits are written in place
-wg ask  --live --repo . "fix the failing test in foo.py and add a regression test"
-wg chat --live --repo .            # multi-turn; edits applied only because --repo is set
-git diff                           # review what it changed; `git checkout .` to undo
+export GROQ_API_KEY="<your key>"
+cd /path/to/your/project && git status
+wg ask --live --repo . "fix the failing test in foo.py and add a regression test"
+git diff
 ```
+
+`wg chat --live --repo .` does the same thing turn by turn.
 
 What `--live --repo` does:
 1. gate → route → compose.
 2. The driver gets the edit format and a redacted, size-capped view of the folder.
 3. Edits are applied only if every edit resolves.
-4. The repo's tests run with `python -m pytest -q` before and after.
+4. Your tests run with `python -m pytest -q` before and after.
 5. One follow-up asks for a test file if you requested one and none was written.
 6. The tester and skeptic review the change.
 7. Unresolved items get one pass on the free mid model.
 
 Paid providers are ignored unless you pass `--allow-paid`. Local Ollama (no key): `--live --local`. Other free keys: docs/KEYS.md.
 
-Edits use `<<<REPLACE path / <<<WITH / <<<END` or `<<<FILE path … >>>`, applied only inside `--repo`.
+Clear errors instead of tracebacks (exit code 2):
+- `--repo` is not a directory → `repo not a directory: …`
+- pytest is missing → `pip install pytest`
+- no usable key → `no key or --live not set`
 
-Limits on real folders today:
-- Tests are only run with `python -m pytest -q`. Other runners are not supported, and a repo without pytest tests reports a non-zero exit.
-- The model sees at most ~24 KB of the folder: the file list plus text files ≤ 8 KB each. Dotfiles and key-like files are skipped.
+A failing test suite is not an error: it is the before/after signal.
+
+## Limits (read before using on real code)
+
+- **pytest only.** Tests are run with `python -m pytest -q` in `--repo`. Other runners are not supported, and a repo without pytest tests reports a non-zero exit before and after.
+- **About 24 KB of context.** The model sees the file list plus text files ≤ 8 KB each, up to ~24 KB in total. Dotfiles and key-like files are skipped. On large repos it will not see most of the code.
+- **Heuristic gate.** Routing (task kind, complexity, which tier) comes from an offline keyword scorer. It is not calibrated, and Laya and Jev are not wired live.
+- **Free models, not frontier.** `--live` uses free-tier models (e.g. Groq `openai/gpt-oss-120b`/`-20b`). No frontier model is ever called, and nothing here claims frontier-level quality.
+- Edits are written in place inside `--repo`. Use git to review and undo them.
 - Logs go to `./.wastegate/` in the directory you run `wg` from.
 
 Status: Phase 2 (routing, skills, instincts v0, ask/run/chat with dry-run, mock and live). See docs/MISSION.md and docs/PHASE2.md.

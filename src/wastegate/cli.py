@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import time
 import urllib.error
@@ -19,7 +20,7 @@ from .compose import compose
 from .instincts import add_instinct, load_instincts, select_instincts
 from .chat import ChatSession
 from .log import TurnLogger, redact
-from .pipeline import UnsafeEdit, run_ask
+from .pipeline import RepoError, UnsafeEdit, run_ask, validate_repo
 from .providers.base import LiveDisabled
 from .providers.live import live_catalog, live_providers
 from .smoke import write_smoke_report
@@ -63,7 +64,7 @@ def _gate_and_route(prompt: str, backend: Optional[str]):
     try:
         gate = BACKENDS[name]().decide(prompt, GATE_QUESTIONS)
     except NotImplementedError as e:
-        out.print(f"{name}: {e}")
+        out.print(f"{name}: {e}", markup=False)
         raise typer.Exit(2)
     ms = round((time.perf_counter() - t0) * 1000, 2)
     return name, gate, do_route(gate, cloud_catalog(), cfgmod.router_config(cfg)), ms
@@ -122,11 +123,11 @@ def init():
     """Write ~/.wastegate/config.toml if absent."""
     p = cfgmod.home() / "config.toml"
     if p.exists():
-        out.print(f"exists: {p}")
+        out.print(f"exists: {p} (no API key needed)")
         return
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(cfgmod.DEFAULT_TOML)
-    out.print(f"wrote {p}")
+    out.print(f"wrote {p} (no API key needed; keys are read from env vars only, see docs/KEYS.md)")
 
 
 @app.command()
@@ -181,6 +182,29 @@ def _stub(phase: str):
     raise typer.Exit(2)
 
 
+def pytest_available() -> bool:
+    """Repo tests run as `python -m pytest` with this interpreter; it must be importable here."""
+    return importlib.util.find_spec("pytest") is not None
+
+
+def _check_repo(repo: Optional[Path]) -> None:
+    if repo is None:
+        return
+    try:
+        validate_repo(repo)
+    except RepoError as e:
+        out.print(str(e), markup=False)
+        raise typer.Exit(2)
+
+
+def _check_pytest(mode: str) -> None:
+    if mode in ("mock", "live") and not pytest_available():
+        out.print("pytest is not installed in this Python environment (wg runs your repo's tests with it).\n"
+                  "Install it with: pip install pytest   (or: pip install -e \".[dev]\" in the Wastegate checkout)",
+                  markup=False)
+        raise typer.Exit(2)
+
+
 def _resolve_mode(dry_run: bool, mock: bool, live: bool, local: bool, allow_paid: bool,
                   replies: Optional[Path]):
     """-> (mode, catalog, providers). Exits 2 on bad combos or when live has nothing usable."""
@@ -202,7 +226,7 @@ def _resolve_mode(dry_run: bool, mock: bool, live: bool, local: bool, allow_paid
         catalog = {"mock": mock_catalog, "dry-run": cloud_catalog,
                    "live": lambda: live_catalog(load_catalog(), allow_paid=allow_paid, local=local)}[mode]()
     except LiveDisabled as e:
-        out.print(f"live: {e}")
+        out.print(f"live: {e}", markup=False)
         raise typer.Exit(2)
     providers = {"dry-run": None, "mock": mock_providers(replies) if replies else None,
                  "live": live_providers(catalog, allow_network=True, allow_paid=allow_paid)}[mode]
@@ -219,20 +243,22 @@ def ask(text: str,
         replies: Optional[Path] = typer.Option(None, help="dir with <role>.md replies (with --mock)"),
         repo: Path = typer.Option(Path("."), help="repo the driver edits and tests run in")):
     """One-shot routed task: --dry-run, --mock, or --live (exactly one)."""
+    _check_repo(repo)
     mode, catalog, providers = _resolve_mode(dry_run, mock, live, local, allow_paid, replies)
+    _check_pytest(mode)
     cfg = cfgmod.load()
     name = cfg.get("systemone", {}).get("backend", "heuristic")
     try:
         res = run_ask(text, repo, BACKENDS[name](), catalog, cfgmod.router_config(cfg), load_builtin(),
                       mode=mode, providers=providers, instincts=load_instincts(STATE))
     except (NotImplementedError, LiveDisabled) as e:
-        out.print(f"{mode}: {e}")
+        out.print(f"{mode}: {e}", markup=False)
         raise typer.Exit(2)
     except (UnsafeEdit, FileNotFoundError) as e:
-        out.print(f"aborted, no edits written: {e}")
+        out.print(f"aborted, no edits written: {e}", markup=False)
         raise typer.Exit(1)
     except urllib.error.URLError as e:  # live only; may fire after edits were applied
-        out.print(f"provider error (edits may already be applied in {repo}): {redact(str(e))}")
+        out.print(f"provider error (edits may already be applied in {repo}): {redact(str(e))}", markup=False)
         raise typer.Exit(1)
     TurnLogger(Path(".wastegate/logs")).write(res.record)
     for line in res.transcript:
@@ -255,7 +281,10 @@ def chat(dry_run: bool = typer.Option(False, "--dry-run", help="route + compose 
          replies: Optional[Path] = typer.Option(None, help="dir with driver.md (with --mock)"),
          repo: Optional[Path] = typer.Option(None, help="apply edits here (without it, edits are shown, not written)")):
     """Multi-turn REPL. Each line: gate -> route -> compose -> driver. /route /skills /exit."""
+    _check_repo(repo)
     mode, catalog, providers = _resolve_mode(dry_run, mock, live, local, allow_paid, replies)
+    if repo is not None:
+        _check_pytest(mode)
     cfg = cfgmod.load()
     name = cfg.get("systemone", {}).get("backend", "heuristic")
     sess = ChatSession(BACKENDS[name](), catalog, cfgmod.router_config(cfg), load_builtin(),

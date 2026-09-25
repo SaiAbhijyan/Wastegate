@@ -71,6 +71,16 @@ class UnsafeEdit(Exception):
     pass
 
 
+class RepoError(Exception):
+    """--repo is not a usable directory."""
+
+
+def validate_repo(path: Path) -> Path:
+    if not Path(path).is_dir():
+        raise RepoError(f"repo not a directory: {path}")
+    return Path(path)
+
+
 class EditError(UnsafeEdit):
     """Edit cannot be applied exactly (missing file, old text absent or ambiguous). Nothing written."""
 
@@ -131,7 +141,7 @@ def repo_context(repo: Path, budget: int = 24_000, max_file: int = 8_000) -> str
             continue
         if p.is_file():
             files.append(p)
-    parts = ["<repo files>\n" + "\n".join(str(p.relative_to(root)) for p in files) + "\n</repo files>\n"]
+    parts = ["<repo files>\n" + "\n".join(p.relative_to(root).as_posix() for p in files) + "\n</repo files>\n"]
     used = len(parts[0].encode())
     for p in files:
         if p.stat().st_size > max_file:
@@ -140,7 +150,7 @@ def repo_context(repo: Path, budget: int = 24_000, max_file: int = 8_000) -> str
             body = p.read_text()
         except UnicodeDecodeError:
             continue
-        block = f"<file path=\"{p.relative_to(root)}\">\n{body}</file>\n"
+        block = f"<file path=\"{p.relative_to(root).as_posix()}\">\n{body}</file>\n"
         if used + len(block.encode()) > budget:
             break
         parts.append(block)
