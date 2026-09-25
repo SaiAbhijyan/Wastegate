@@ -9,9 +9,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ..catalog import Catalog
+from ..catalog import TIERS, Catalog
 from ..providers.base import LiveDisabled
-from ..router import RouterConfig, route
+from ..router import RouterConfig
 from .base import GATE_QUESTIONS, Answer, Question, noul_answer
 from .heuristic import HeuristicSystemOne
 from .shortlist import shortlist
@@ -57,6 +57,7 @@ class AgentPlan:
     harness: bool
     kind: str
     answers: dict = field(default_factory=dict)
+    harness_mode: str = ""  # "full" | "code-only" | "off" (set by agent.build_system)
 
 
 def _ans(a: Answer) -> dict:
@@ -70,7 +71,9 @@ def agent_plan(prompt: str, s1, catalog: Catalog, cfg: RouterConfig, max_steps: 
     ids = [m.id for m in catalog.models]
     q = model_pick_question(ids, prompt)
     if isinstance(s1, HeuristicSystemOne):
-        pick = route(gate, catalog, cfg).driver.model
+        # Cheapest tier first (e.g. Groq gpt-oss-20b over -120b); Jev may override via model_pick later.
+        cheapest = min(catalog.tiers(), key=TIERS.index)
+        pick = catalog.first(cheapest).id
         opts = q.options if q else tuple(ids)
         if pick not in opts:
             pick = opts[0]

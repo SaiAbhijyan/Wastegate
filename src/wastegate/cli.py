@@ -266,6 +266,9 @@ def ask(text: str,
         raise typer.Exit(1)
     except urllib.error.URLError as e:  # live only; may fire after edits were applied
         out.print(f"provider error (edits may already be applied in {repo}): {redact(str(e))}", markup=False)
+        TurnLogger(Path(".wastegate/logs")).write(
+            {"prompt": text, "mode": mode, "provider_error": {"status": getattr(e, "status", None),
+                                                              "body": getattr(e, "body", redact(str(e)))}})
         raise typer.Exit(1)
     TurnLogger(Path(".wastegate/logs")).write(res.record)
     for line in reply_lines(res.driver_text):
@@ -288,7 +291,8 @@ def _ask_loop(text, repo, mode, catalog, providers, cfg, name, max_steps):
     try:
         plan = plan_turn(text, s1, catalog, rcfg, load_builtin(), load_instincts(STATE))
         lines, rec, _ = agent_turn(text, plan, s1, catalog, rcfg, providers, repo,
-                                   max_steps or int(cfg.get("agent", {}).get("max_steps", 8)), f"ask-agent-{mode}")
+                                   max_steps or int(cfg.get("agent", {}).get("max_steps", 8)), f"ask-agent-{mode}",
+                                   max_system_bytes=int(cfg.get("agent", {}).get("max_system_bytes", 12000)))
     except (NotImplementedError, LiveDisabled) as e:
         out.print(f"{mode}: {redact(str(e))}", markup=False)
         raise typer.Exit(2)
@@ -299,8 +303,12 @@ def _ask_loop(text, repo, mode, catalog, providers, cfg, name, max_steps):
     for line in lines:
         out.print(redact(line), markup=False)
     if mode == "live":
-        p = write_smoke_report(rec, Path("results"), datetime.now(timezone.utc).strftime("%Y%m%d"))
-        out.print(f"smoke report: {p}", markup=False)
+        p = write_smoke_report(rec, Path("results"), datetime.now(timezone.utc).strftime("%Y%m%d"), name="live-agent")
+        out.print(f"live report: {p}", markup=False)
+    if rec.get("provider_error"):
+        e = rec["provider_error"]
+        out.print(f"provider error: HTTP {e['status']}: {e['body']}", markup=False)
+        raise typer.Exit(1)
 
 
 app.command("run", help="Alias of `wg ask` (same flags): one-shot routed task. "

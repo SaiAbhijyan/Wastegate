@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
 import urllib.request
 from typing import Callable, Optional
 
@@ -17,18 +18,42 @@ from .base import Completion, LiveDisabled, Usage
 Transport = Callable[[str, dict, dict], dict]
 
 
+ERROR_BODY_CAP = 1000
+
+
+class ProviderHTTPError(urllib.error.URLError):
+    """Non-2xx from a provider, with the (redacted, capped) response body so users can see WHY."""
+
+    def __init__(self, status: int, body: str):
+        from ..log import redact
+        self.status = status
+        self.body = redact(body)[:ERROR_BODY_CAP]
+        super().__init__(f"HTTP {status}: {self.body}")
+
+    def __str__(self) -> str:
+        return f"HTTP {self.status}: {self.body}"
+
+
 def post_json(url: str, headers: dict, body: dict) -> dict:
     # Explicit User-Agent: Cloudflare-fronted APIs (api.groq.com) return 403 / error 1010 for Python-urllib.
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), method="POST",
                                  headers={"content-type": "application/json",
                                           "user-agent": f"wastegate/{__version__}", **headers})
-    with urllib.request.urlopen(req, timeout=300) as r:
-        return json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        try:
+            raw = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            raw = ""
+        raise ProviderHTTPError(e.code, raw or str(e.reason)) from None
 
 
 class LiveAdapter:
     name = ""
     key_envs: tuple[str, ...] = ()
+    max_tokens_cap: Optional[int] = None  # set by live_providers from the catalog tier
 
     def __init__(self, allow_network: bool = False, transport: Optional[Transport] = None):
         self.allow_network = allow_network
@@ -50,6 +75,8 @@ class LiveAdapter:
 
     def complete(self, model_id: str, system: str, messages: list[dict], max_tokens: int) -> Completion:
         key = self.check()
+        if self.max_tokens_cap:
+            max_tokens = min(max_tokens, self.max_tokens_cap)
         url, headers, body = self.build(key, model_id, system, messages, max_tokens)
         raw = (self._transport or post_json)(url, headers, body)
         text, usage = self.parse(raw)

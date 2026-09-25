@@ -12,6 +12,7 @@ from typing import Callable, Optional
 
 from .agent_tools import PYTEST_CMD, ToolError, is_test_command, tool_grep, tool_pytest, tool_read, tool_shell
 from .log import redact
+from .providers.http import ProviderHTTPError
 from .pipeline import (CONTEXT_SKIP_DIRS, CONTEXT_SKIP_NAMES, EDIT_FORMAT, FILE_BLOCK, REPLACE_BLOCK, TEST_PATH,
                        UnsafeEdit, _call, _snapshot, apply_edits, parse_edits)
 from .skills.registry import builtin_root
@@ -66,13 +67,28 @@ def protocol(tools: tuple[str, ...]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def build_system(composed_system: str, plan: AgentPlan, repo: Path) -> str:
+MAX_SYSTEM_BYTES = 12_000
+CODE_GATE_NOTE = ("Verification gate (enforced by the harness, not by you):\n"
+                  "- After your last edit, run the tests (<<<TOOL pytest>>>) before finishing.\n"
+                  "- Never delete, skip, xfail or weaken a test, or change an expected value; never add noqa/type: ignore.\n"
+                  "- The harness prints VERIFICATION: PASS | NOT VERIFIED from its own test runs.\n")
+
+
+def build_system(composed_system: str, plan: AgentPlan, repo: Path, max_system_bytes: int = MAX_SYSTEM_BYTES) -> str:
+    """Full harness skill only if the whole system prompt fits max_system_bytes; else a short code-gate note.
+    The code gate (verify()) is identical either way. Sets plan.harness_mode = full | code-only | off."""
     parts = [composed_system, protocol(plan.tools),
              "<repo files>\n" + "\n".join(repo_file_list(repo)) + "\n</repo files>\n"]
-    if plan.harness:
-        parts.append("<skill id=\"verification-harness\" source=\"user-supplied, MIT\">\n" + harness_body()
-                     + "\n</skill>\n")
-    return "\n".join(parts)
+    base = "\n".join(parts)
+    if not plan.harness:
+        plan.harness_mode = "off"
+        return base
+    full = base + "\n<skill id=\"verification-harness\" source=\"user-supplied, MIT\">\n" + harness_body() + "\n</skill>\n"
+    if len(full.encode("utf-8")) <= max_system_bytes:
+        plan.harness_mode = "full"
+        return full
+    plan.harness_mode = "code-only"
+    return base + "\n" + CODE_GATE_NOTE
 
 
 TOOL_LINE = re.compile(r"^[ \t]*TOOL[ \t]+(read|grep|edit|pytest|shell)\b[ \t]*(.*)$", re.MULTILINE)
@@ -142,6 +158,7 @@ def _passed(output: str) -> int:
 @dataclass
 class LoopResult:
     tool_calls: list = field(default_factory=list)
+    provider_error: Optional[dict] = None
     calls: list = field(default_factory=list)
     step_lines: list = field(default_factory=list)
     final_text: str = ""
@@ -171,7 +188,13 @@ def run_agent(prompt: str, repo: Path, plan: AgentPlan, providers: Callable, sys
         except FileNotFoundError:
             res.stop_reason = "script ended"
             break
-        c = prov.complete(plan.model_id, system, messages, budget)
+        try:
+            c = prov.complete(plan.model_id, system, messages, budget)
+        except ProviderHTTPError as e:
+            res.provider_error = {"step": step, "status": e.status, "body": e.body}
+            res.step_lines.append(f"[step {step}] provider error: HTTP {e.status}: {e.body}")
+            res.stop_reason = "provider error"
+            break
         res.calls.append(_call(f"agent_{step}", tier, c))
         last_text = c.text
         messages.append({"role": "assistant", "content": c.text})

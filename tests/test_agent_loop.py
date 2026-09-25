@@ -149,15 +149,16 @@ def test_no_harness_body_for_explain(obo, tmp_path, monkeypatch):
     for prompt, want in (("explain how git rebase works", False), (PROMPT, True)):
         p = plan_turn(prompt, HeuristicSystemOne(), mock_catalog(), RouterConfig(), load_builtin())
         ap = agent_plan(prompt, HeuristicSystemOne(), mock_catalog(), RouterConfig())
-        system = build_system(p.composed.system, ap, obo)
+        system = build_system(p.composed.system, ap, obo, max_system_bytes=100_000)  # room for the full skill
         assert ("No evidence = not done" in system) is want
+        assert ap.harness_mode == ("full" if want else "off")
 
 
 def test_dry_run_repo_shows_plan(obo, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     r = runner.invoke(app, ["chat", "--dry-run", "--repo", str(obo)], input=f"{PROMPT}\n/exit\n")
     assert r.exit_code == 0 and "no generation" in r.output and "agent: model=" in r.output
-    assert "harness=on" in r.output and "max_steps=8" in r.output
+    assert "harness=code-only" in r.output and "max_steps=8" in r.output  # default 12 KB budget strips the skill
 
 
 def test_oneshot_flag_keeps_old_path(obo, tmp_path, monkeypatch):

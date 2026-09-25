@@ -78,5 +78,5 @@ Jev uses the same `Question`/`Answer` interface. `jev.build_request` already sha
 - It uses a text action protocol, not native function calling. A model that ignores the protocol just ends the loop.
 - The shell allowlist is **not a sandbox**: `python file.py` can run arbitrary code in that file.
 - The tamper detector is a line-level heuristic, not a semantic proof.
-- When loaded, the harness skill adds ~16.6 KB (~4k tokens) to every step's system prompt.
+- The full harness skill (~16.6 KB) is sent only if the whole system prompt fits `[agent] max_system_bytes` (default 12000). Otherwise the model gets a short code-gate note (`harness=code-only`); the code-enforced VERIFICATION gate is the same either way. Per-call `max_tokens` is capped per tier (cheap 4096, mid 8192). One live Groq agent run (`results/20260925-live-agent.md`) got HTTP 400 `tool_use_failed`: gpt-oss-20b emitted a native tool call that our text protocol does not declare. The live agent loop does not work on Groq yet.
 - No parity claim with Claude Code, OpenCode, Fable 5.1 or Astra. No live agent run has been made yet.

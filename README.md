@@ -110,7 +110,7 @@ A failing test suite is not an error: it is the before/after signal.
 - **Heuristic gate.** Routing (task kind, complexity, which tier) comes from an offline keyword scorer. It is not calibrated, and Laya and Jev are not wired live.
 - **Free models, not frontier.** `--live` uses free-tier models (e.g. Groq `openai/gpt-oss-120b`/`-20b`). No frontier model is ever called, and nothing here claims frontier-level quality.
 - Edits are written in place inside `--repo`. Use git to review and undo them.
-- The agent loop's shell allowlist is not a sandbox: `python <file>.py` runs arbitrary code from that file. The tamper check is line-level, not a proof. When loaded, the harness skill adds ~16.6 KB to every step's prompt. The agent loop has only been run with mocks so far.
+- The agent loop's shell allowlist is not a sandbox: `python <file>.py` runs arbitrary code from that file. The tamper check is line-level, not a proof. The full harness skill (~16.6 KB) is sent only if the whole system prompt fits `[agent] max_system_bytes` (default 12000). Otherwise the model gets a short code-gate note (`harness=code-only`); the code-enforced VERIFICATION gate is the same either way. Per-call `max_tokens` is capped per tier (cheap 4096, mid 8192). One live Groq agent run (`results/20260925-live-agent.md`) got HTTP 400 `tool_use_failed`: gpt-oss-20b emitted a native tool call that our text protocol does not declare. The live agent loop does not work on Groq yet.
 - Logs go to `./.wastegate/` in the directory you run `wg` from.
 
 Status: Phase 2 (routing, skills, instincts v0, ask/run/chat with dry-run, mock and live). See docs/MISSION.md and docs/PHASE2.md.

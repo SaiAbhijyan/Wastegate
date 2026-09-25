@@ -4,6 +4,7 @@ import sys
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
+from typing import Optional
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -21,6 +22,7 @@ class Model:
     name: str
     verified: bool
     source: str
+    max_output_tokens: Optional[int] = None  # honored only when verified=True (live.TIER_CAPS otherwise)
 
 
 @dataclass(frozen=True)

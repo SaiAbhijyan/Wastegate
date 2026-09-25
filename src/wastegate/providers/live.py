@@ -45,6 +45,16 @@ def live_catalog(catalog: Catalog, allow_paid: bool = False, local: bool = False
     return sub
 
 
+TIER_CAPS = {"local": 4096, "cheap": 4096, "mid": 8192, "frontier": 8192}
+
+
+def token_cap(m: Model) -> int:
+    cap = TIER_CAPS.get(m.tier, 4096)
+    if m.verified and m.max_output_tokens:
+        cap = min(cap, m.max_output_tokens)
+    return cap
+
+
 def live_providers(catalog: Catalog, allow_network: bool, transport=None, allow_paid: bool = False):
     """Factory(role, model_id) -> adapter, checked at resolve time (before any repo write or HTTP).
     Paid gate is enforced here too, so an unfiltered catalog cannot reach a paid model.
@@ -57,5 +67,6 @@ def live_providers(catalog: Catalog, allow_network: bool, transport=None, allow_
             raise LiveDisabled(f"paid model {model_id!r} refused; set ALLOW_PAID=1 or pass --allow-paid")
         a = ADAPTERS[m.provider](allow_network=allow_network, transport=transport)
         a.check()
+        a.max_tokens_cap = token_cap(m)  # tier cap, or smaller verified catalog cap
         return a
     return get

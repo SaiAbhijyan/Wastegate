@@ -7,7 +7,7 @@ from typing import Callable, Mapping, Optional
 
 from .catalog import Catalog
 from .instincts import load_instincts
-from .agent import build_system, run_agent, verification_lines
+from .agent import MAX_SYSTEM_BYTES, build_system, run_agent, verification_lines
 from .log import TurnLogger
 from .systemone.agent_gate import agent_plan
 from .pipeline import (ANY_EDIT, Plan, UnsafeEdit, _call, cap_text, _snapshot, _try_provider, apply_edits, driver_request,
@@ -28,24 +28,25 @@ def reply_lines(driver_text):
 
 
 def agent_turn(text: str, plan: Plan, s1, catalog: Catalog, cfg: RouterConfig, providers, repo: Path,
-               max_steps: int, mode_label: str, history=None):
+               max_steps: int, mode_label: str, history=None, max_system_bytes: int = MAX_SYSTEM_BYTES):
     """One agent-loop turn shared by `wg ask --repo` and `wg chat --repo`.
     -> (lines to print: steps, driver reply, scoreboard, VERIFICATION; JSONL record; final text or None)."""
     ap = agent_plan(text, s1, catalog, cfg, max_steps=max_steps, gate=plan.gate)
+    system = build_system(plan.composed.system, ap, repo, max_system_bytes)
     picks = (f"agent: model={ap.model_id} tools={','.join(ap.tools)} max_steps={ap.max_steps} "
-             f"harness={'on' if ap.harness else 'off'} tool_loop={ap.answers['tool_loop']['value']:.2f}")
+             f"harness={ap.harness_mode} tool_loop={ap.answers['tool_loop']['value']:.2f}")
     rec = {**plan.record, "mode": mode_label, "driver_text": None,
            "agent": {"model_id": ap.model_id, "tools": list(ap.tools), "max_steps": ap.max_steps,
-                     "harness": ap.harness, "answers": ap.answers}}
+                     "harness": ap.harness_mode, "system_bytes": len(system.encode("utf-8")),
+                     "answers": ap.answers}}
     if providers is None:
         return reply_lines(None) + list(plan.transcript) + [picks, "generation: (empty, dry-run)"], rec, None
-    system = build_system(plan.composed.system, ap, repo)
     res = run_agent(text, repo, ap, providers, system, plan.route.driver.budget_tokens,
                     history=history, tier=plan.route.driver.tier)
     lines = (res.step_lines + reply_lines(cap_text(res.final_text, limit=None)) + list(plan.transcript)
              + [picks] + verification_lines(res.verification))
     rec.update(tool_calls=res.tool_calls, calls=res.calls, verification=res.verification,
-               stop_reason=res.stop_reason, driver_text=cap_text(res.final_text),
+               stop_reason=res.stop_reason, driver_text=cap_text(res.final_text), provider_error=res.provider_error,
                provider=res.calls[0]["provider"] if res.calls else None, model_id=ap.model_id,
                tokens_in=_sum(res.calls, "tokens_in"), tokens_out=_sum(res.calls, "tokens_out"), usd=None)
     return lines, rec, res.final_text

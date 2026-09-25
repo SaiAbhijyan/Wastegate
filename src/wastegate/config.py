@@ -24,6 +24,7 @@ reviewer_budget_tokens = 8192   # tester/skeptic max_tokens; reasoning models ne
 
 [agent]
 max_steps = 8                   # wg chat --repo tool-loop cap
+max_system_bytes = 12000        # full harness skill only if the system prompt fits; else code-only gate
 """
 
 

@@ -41,12 +41,12 @@ def _ran(d) -> str:
     return f"no ({d.get('reason', '')})"
 
 
-def write_smoke_report(record: dict, out_dir: Path, date: str) -> Path:
+def write_smoke_report(record: dict, out_dir: Path, date: str, name: str = "live-smoke") -> Path:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    p, n = out_dir / f"{date}-live-smoke.md", 2
+    p, n = out_dir / f"{date}-{name}.md", 2
     while p.exists():
-        p, n = out_dir / f"{date}-live-smoke-{n}.md", n + 1
+        p, n = out_dir / f"{date}-{name}-{n}.md", n + 1
     lines = [f"# {date} live smoke", "",
              "**wiring + contract check, not a benchmark.** One `wg ask --live` invocation; not a quality claim.", "",
              f"- prompt: {record.get('prompt')}",
@@ -57,6 +57,22 @@ def write_smoke_report(record: dict, out_dir: Path, date: str) -> Path:
              f"- follow-up ran: {_ran(record.get('followup'))}",
              f"- mid escalation ran: {_ran(record.get('mid_escalation'))}",
              "- usd: null (no verified price in catalog)", ""]
+    if record.get("agent"):
+        a, v = record["agent"], record.get("verification") or {}
+        lines += ["## agent loop", "",
+                  "**wiring check only, not a benchmark.**", "",
+                  f"- model: `{a.get('model_id')}` · harness: {a.get('harness')} · system prompt: {a.get('system_bytes')} B"
+                  f" · max_steps: {a.get('max_steps')}",
+                  f"- stop reason: {record.get('stop_reason')}",
+                  f"- tool steps: " + (", ".join(f"{c['step']}:{c['tool']}" + ("" if c.get("ok", True) else "(error)")
+                                               for c in record.get("tool_calls") or []) or "none"),
+                  f"- VERIFICATION: {v.get('status')}" + (f" ({v.get('reason')})" if v.get("reason") else ""),
+                  f"- checks: " + ("; ".join(f"{c['cmd']} → exit {c['exit']}" for c in v.get("checks") or []) or "none"),
+                  ""]
+    if record.get("provider_error"):
+        e = record["provider_error"]
+        lines += ["## provider error", "", f"HTTP {e.get('status')} (redacted body, ≤1000 chars):", "", "```text",
+                  str(e.get("body")), "```", ""]
     for c in record.get("calls", []):
         lines += [f"## {c['role']}: {c['provider']} `{c['model_id']}` (tier {c.get('tier')})", "",
                   f"host: {_host(c['provider'])}", "",
