@@ -7,17 +7,32 @@ import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Callable, Mapping, Optional
+from typing import Callable, Mapping, Optional, Sequence
 
 from .catalog import Catalog
-from .compose import compose
+from .compose import Composed, compose
 from .escalate import escalate_slice
 from .providers.base import Completion, Provider
-from .router import RouterConfig, route
+from .router import Route, RouterConfig, route
 from .skills.registry import Skill
 from .systemone.base import GATE_QUESTIONS, SystemOne
 
 FILE_BLOCK = re.compile(r"^<<<FILE (\S+)\n(.*?)\n>>>$", re.DOTALL | re.MULTILINE)
+REPLACE_BLOCK = re.compile(r"^<<<REPLACE (\S+)\n(.*?)\n<<<WITH\n(.*?)<<<END$", re.DOTALL | re.MULTILINE)
+ANY_EDIT = re.compile(r"^<<<(FILE|REPLACE) ", re.MULTILINE)
+EDIT_FORMAT = """Edit format (the only way your changes reach the repo; paths relative to the repo root):
+<<<REPLACE path/to/file.py
+exact existing text (must occur exactly once)
+<<<WITH
+new text
+<<<END
+To create or fully rewrite a file:
+<<<FILE path/to/file.py
+full file contents
+>>>
+"""
+CONTEXT_SKIP_DIRS = {".git", ".wastegate", "__pycache__", ".venv", "venv", "node_modules", ".pytest_cache", "results"}
+CONTEXT_SKIP_NAMES = re.compile(r"^(\..*|id_rsa.*|id_ed25519.*|.*\.(pem|key|p12|pfx)|credentials.*|secrets?\..*)$")
 TESTER = re.compile(r"^\s*TESTER:\s*(pass|fail)\s*$", re.IGNORECASE | re.MULTILINE)
 VERDICT = re.compile(r"^\s*VERDICT:\s*(approve|reject)\s*$", re.IGNORECASE | re.MULTILINE)
 
@@ -26,22 +41,81 @@ class UnsafeEdit(Exception):
     pass
 
 
+class EditError(UnsafeEdit):
+    """Edit cannot be applied exactly (missing file, old text absent or ambiguous). Nothing written."""
+
+
 @dataclass
 class TurnResult:
     record: dict
     transcript: list[str] = field(default_factory=list)
 
 
+def _guard(rel: str, root: Path) -> Path:
+    p = Path(rel)
+    if p.is_absolute() or not (root / p).resolve().is_relative_to(root):
+        raise UnsafeEdit(f"edit path escapes repo: {rel}")
+    return root / p
+
+
 def parse_edits(text: str, repo: Path) -> list[tuple[str, str]]:
-    """All-or-nothing: every path must be relative and resolve inside repo."""
+    """Resolve every FILE / REPLACE block, in document order, entirely in memory.
+    Returns (rel, final_content) per touched file. Raises before anything is written."""
     root = repo.resolve()
-    edits = []
-    for rel, body in FILE_BLOCK.findall(text):
-        p = Path(rel)
-        if p.is_absolute() or not (root / p).resolve().is_relative_to(root):
-            raise UnsafeEdit(f"edit path escapes repo: {rel}")
-        edits.append((rel, body + "\n"))
-    return edits
+    blocks = sorted([(m.start(), "file", m) for m in FILE_BLOCK.finditer(text)]
+                    + [(m.start(), "replace", m) for m in REPLACE_BLOCK.finditer(text)], key=lambda b: b[0])
+    content: dict[str, str] = {}
+    for _, kind, m in blocks:
+        rel = m.group(1)
+        path = _guard(rel, root)
+        if kind == "file":
+            content[rel] = m.group(2) + "\n"
+            continue
+        old, new = m.group(2), m.group(3)
+        new = new[:-1] if new.endswith("\n") else new
+        if rel not in content:
+            if not path.is_file():
+                raise EditError(f"REPLACE target does not exist: {rel}")
+            content[rel] = path.read_text()
+        n = content[rel].count(old)
+        if n != 1:
+            raise EditError(f"REPLACE old text in {rel} " + ("not found" if n == 0 else f"found {n} times"))
+        content[rel] = content[rel].replace(old, new, 1)
+    return list(content.items())
+
+
+def apply_edits(repo: Path, edits: list[tuple[str, str]]) -> None:
+    for rel, body in edits:
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(body)
+
+
+def repo_context(repo: Path, budget: int = 24_000, max_file: int = 8_000) -> str:
+    """File list + small text files for the driver. Skips dotfiles, key-like files, logs; redacted; capped."""
+    from .log import redact
+    root = repo.resolve()
+    files = []
+    for p in sorted(root.rglob("*")):
+        rel = p.relative_to(root)
+        if any(part in CONTEXT_SKIP_DIRS or CONTEXT_SKIP_NAMES.match(part) for part in rel.parts):
+            continue
+        if p.is_file():
+            files.append(p)
+    parts = ["<repo files>\n" + "\n".join(str(p.relative_to(root)) for p in files) + "\n</repo files>\n"]
+    used = len(parts[0].encode())
+    for p in files:
+        if p.stat().st_size > max_file:
+            continue
+        try:
+            body = p.read_text()
+        except UnicodeDecodeError:
+            continue
+        block = f"<file path=\"{p.relative_to(root)}\">\n{body}</file>\n"
+        if used + len(block.encode()) > budget:
+            break
+        parts.append(block)
+        used += len(block.encode())
+    return redact("".join(parts))[:budget]
 
 
 def _findings(text: str) -> list[str]:
@@ -81,22 +155,51 @@ def _total(calls: list[dict], key: str):
     return sum(vals) if vals and all(v is not None for v in vals) else None
 
 
-def run_ask(prompt: str, repo: Path, s1: SystemOne, catalog: Catalog, cfg: RouterConfig,
-            registry: Mapping[str, Skill], mode: str = "dry-run", providers: Optional[Callable[[str, Optional[str]], Provider]] = None) -> TurnResult:
-    """providers=None means dry-run: no generation."""
+@dataclass
+class Plan:
+    gate: dict
+    route: Route
+    composed: Composed
+    record: dict
+    transcript: list[str]
+
+
+def plan_turn(prompt: str, s1: SystemOne, catalog: Catalog, cfg: RouterConfig,
+              registry: Mapping[str, Skill], instincts: Sequence[str] = ()) -> Plan:
+    """gate -> route -> compose. Shared by wg ask and wg chat. No provider calls."""
     gate = s1.decide(prompt, GATE_QUESTIONS)
     r = route(gate, catalog, cfg)
-    c = compose(r, prompt, registry)
-    out = TurnResult({"prompt": prompt, "backend": s1.name, "route": r.to_dict(),
-                      "gate": {k: {"value": a.value, "confidence": a.confidence} for k, a in gate.items()},
-                      "skills": [{"id": s, "sha": registry[s].sha256} for s in c.included],
-                      "calls": []})
-    t = out.transcript
-    t.append(f"gate: kind={gate['kind'].value} complexity={gate['complexity'].value} (backend={s1.name}, uncalibrated)")
-    t.append(f"driver: {r.driver.tier} {r.driver.model} budget={r.driver.budget_tokens}")
+    c = compose(r, prompt, registry, instincts=instincts)
+    record = {"prompt": prompt, "backend": s1.name, "route": r.to_dict(),
+              "gate": {k: {"value": a.value, "confidence": a.confidence} for k, a in gate.items()},
+              "skills": [{"id": s, "sha": registry[s].sha256} for s in c.included],
+              "instincts": list(c.instincts), "calls": []}
+    t = [f"gate: kind={gate['kind'].value} complexity={gate['complexity'].value} (backend={s1.name}, uncalibrated)",
+         f"driver: {r.driver.tier} {r.driver.model} budget={r.driver.budget_tokens}"]
     t += [f"  + {s.role}: {s.tier} {s.model}" for s in r.specialists]
     t.append(f"skills composed: {', '.join(c.included)} ({len(c.system.encode())} bytes)"
              + (f"; dropped: {', '.join(c.dropped)}" if c.dropped else ""))
+    if c.instincts:
+        t.append(f"instincts injected: {len(c.instincts)}")
+    return Plan(gate, r, c, record, t)
+
+
+def driver_request(plan: Plan, prompt: str, repo: Optional[Path]) -> tuple[str, str]:
+    """(system, user) for the driver. With a repo: edit format + repo context."""
+    if repo is None:
+        return plan.composed.system, prompt
+    return plan.composed.system + "\n" + EDIT_FORMAT, prompt + "\n\n" + repo_context(repo)
+
+
+def run_ask(prompt: str, repo: Path, s1: SystemOne, catalog: Catalog, cfg: RouterConfig,
+            registry: Mapping[str, Skill], mode: str = "dry-run",
+            providers: Optional[Callable[[str, Optional[str]], Provider]] = None,
+            instincts: Sequence[str] = ()) -> TurnResult:
+    """providers=None means dry-run: no generation."""
+    plan = plan_turn(prompt, s1, catalog, cfg, registry, instincts)
+    r, c = plan.route, plan.composed
+    out = TurnResult(plan.record, plan.transcript)
+    t = out.transcript
     if providers is None:
         out.record.update(mode="dry-run", generation="")
         t.append("generation: (empty, dry-run)")
@@ -114,14 +217,12 @@ def run_ask(prompt: str, repo: Path, s1: SystemOne, catalog: Catalog, cfg: Route
             ts_p = providers("tester", ts.model)
         except FileNotFoundError as e:  # missing tester reply = skip, not abort
             tester = {"status": "skipped", "findings": [], "reason": str(e)}
-    msgs = [{"role": "user", "content": prompt}]
-    drv = drv_p.complete(r.driver.model, c.system, msgs, r.driver.budget_tokens)
+    system, user = driver_request(plan, prompt, repo)
+    drv = drv_p.complete(r.driver.model, system, [{"role": "user", "content": user}], r.driver.budget_tokens)
     calls = [_call("driver", r.driver.tier, drv)]
     edits = parse_edits(drv.text, repo)  # raises before any write
     before = run_tests(repo)
-    for rel, body in edits:
-        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
-        (repo / rel).write_text(body)
+    apply_edits(repo, edits)
     after = run_tests(repo)
     t.append(f"edits: {', '.join(e for e, _ in edits) or '(none)'}")
     t.append(f"tests: before={before} after={after}")
