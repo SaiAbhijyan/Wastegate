@@ -8,6 +8,7 @@ import os
 import urllib.request
 from typing import Callable, Optional
 
+from .. import __version__
 from .base import LiveDisabled
 from .http import OpenAICompatible, Transport
 
@@ -15,7 +16,8 @@ BASE = "http://127.0.0.1:11434"
 
 
 def _default_probe() -> None:
-    with urllib.request.urlopen(f"{BASE}/v1/models", timeout=2) as r:
+    req = urllib.request.Request(f"{BASE}/v1/models", headers={"user-agent": f"wastegate/{__version__}"})
+    with urllib.request.urlopen(req, timeout=2) as r:
         r.read(1)
 
 

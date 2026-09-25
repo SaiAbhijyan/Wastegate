@@ -11,14 +11,17 @@ import os
 import urllib.request
 from typing import Callable, Optional
 
+from .. import __version__
 from .base import Completion, LiveDisabled, Usage
 
 Transport = Callable[[str, dict, dict], dict]
 
 
 def post_json(url: str, headers: dict, body: dict) -> dict:
+    # Explicit User-Agent: Cloudflare-fronted APIs (api.groq.com) return 403 / error 1010 for Python-urllib.
     req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
-                                 headers={"content-type": "application/json", **headers})
+                                 headers={"content-type": "application/json",
+                                          "user-agent": f"wastegate/{__version__}", **headers})
     with urllib.request.urlopen(req, timeout=300) as r:
         return json.loads(r.read())
 
