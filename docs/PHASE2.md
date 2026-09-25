@@ -1,6 +1,6 @@
 # PHASE 2: generation contract
 
-Status 2026-09-24: **2a (mock + dry-run) implemented. 2b-prep: live adapters written but dark** (key + `--live` required; always off under pytest). No live call has been made. Verified field names: docs/PROVIDERS.md (supersedes the usage table below).
+Status 2026-09-25: 2a (mock + dry-run) and 2b (live adapters) are implemented. First live wiring check passed on Groq (N=1, results/20260925-live-smoke.md). The driver fixed `add()`, but the tester and skeptic replies did not follow the required format. Verified field names: docs/PROVIDERS.md.
 
 ## Provider fabric (one interface)
 
@@ -31,10 +31,20 @@ gate → route → compose → **driver** → apply FILE blocks (path-guarded to
 
 - `--dry-run`: stops after compose. Generation is empty and no provider is called.
 - `--mock --replies DIR`: `MockProvider` returns `DIR/<role>.md`. Model IDs are `mock-cheap | mock-mid`, never real IDs.
-- `--live`: real adapters on the key-filtered catalog (docs/PROVIDERS.md). Paid keys and models (Anthropic, OpenAI, non-`:free` OpenRouter) are ignored unless you pass `--allow-paid` or set `ALLOW_PAID=1`. Free-tier options: Groq, Gemini, OpenRouter `:free` (docs/KEYS.md). Exit 2 with `LiveDisabled` if no key is set (checked before any write). A successful live run also writes `results/YYYYMMDD-live-smoke.md` (never overwritten), with each call's raw `usage` JSON exactly as returned, keys redacted, and `usd: null`. One invocation makes up to 3 provider calls (driver, tester, skeptic). **Not run yet: no key has been provided.**
+- `--live`: real adapters on the key-filtered catalog (docs/PROVIDERS.md). Paid keys and models (Anthropic, OpenAI, non-`:free` OpenRouter) are ignored unless you pass `--allow-paid` or set `ALLOW_PAID=1`. Free-tier options: Groq, Gemini, OpenRouter `:free` (docs/KEYS.md). Exit 2 with `LiveDisabled` if no key is set (checked before any write). A successful live run also writes `results/YYYYMMDD-live-smoke.md` (never overwritten), with each call's raw `usage` JSON exactly as returned, keys redacted, and `usd: null`. One invocation makes up to 3 provider calls (driver, tester, skeptic). First run: results/20260925-live-smoke.md.
 - No mode: exit 2 (live not enabled).
 
-Driver edit format (a deliberately minimal whole-file replace; unified diffs are deferred):
+Driver edit formats. The driver receives this format and a redacted, capped repo context (the file list plus small text files; dotfiles and key-like files are skipped). All blocks are resolved in memory, in order, before anything is written. REPLACE old text must occur exactly once.
+
+```text
+<<<REPLACE rel/path.py
+exact old text
+<<<WITH
+new text
+<<<END
+```
+
+Whole-file form:
 
 ```text
 <<<FILE rel/path.py
@@ -70,3 +80,15 @@ The fixture tests pass under routed cheap or mid, and tokens are logged. **2a me
 ## Out of scope for 2a
 
 Live HTTP, provider SDKs, prices, `wg proxy`, ANTHROPIC_BASE_URL, OmniRoute/Headroom, laya install, ECE.
+
+## wg chat
+
+A REPL. For each line: gate → route → compose (instincts injected) → driver, with the last 10 history messages. `--dry-run | --mock --replies DIR | --live [--local] [--allow-paid]`. Edits are applied only with `--repo`, using the same parser, guard, all-or-nothing rule and before/after tests as `ask`. Without `--repo` they are printed but not applied. `/route /skills /exit`. Output is redacted. One JSONL line per turn.
+
+## Local (Ollama)
+
+`--live --local` uses only `provider = "ollama"` rows at `http://127.0.0.1:11434/v1` with no key. It probes `/v1/models` first; if Ollama is down it exits 2 before any write. Local rows never appear in cloud `--live`, `route`, `prompt` or dry-run views.
+
+## Instincts v0
+
+`wg review -1 --note "…"` appends one redacted preference (at most 200 characters) to `.wastegate/instincts.jsonl`, tagged with the reviewed turn's gate kind. Each compose injects up to 3: same kind first, then newest first. There is no decay, clustering or evolution yet.

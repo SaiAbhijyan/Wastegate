@@ -13,8 +13,10 @@
 | `wg eval run --suite route_quality` | 3 | session 1: dry-prints the frozen label file + sha256 only |
 | `wg ask "…" --dry-run` / `--mock --replies DIR` / `--live [--allow-paid]` `[--repo P]` | 2a / 2b-prep | dry-run + mock implemented (no network); `--live` exits 2 without a key; no mode → exit 2. See docs/PHASE2.md, docs/PROVIDERS.md |
 | `wg label new --out F [--pool P] --labeler NAME` | 3-prep | shows one unlabeled pool prompt at a time and appends the human's `kind` to JSONL; never shows a model prediction |
-| `wg review -1\|+1` / `--verdict -1\|+1 [--note]` | 2a stub | writes verdict onto last log line only |
-| `wg chat`, `run`, `feedback`, `evolve`, `report`, `proxy` | 2b–5 | stub, exit 2 |
+| `wg review -1\|+1` / `--verdict -1\|+1 [--note]` | 4 (v0) | writes verdict onto last log line; `-1 --note` also saves an instinct |
+| `wg chat --dry-run \| --mock --replies DIR \| --live [--local] [--allow-paid] [--repo P]` | 2 | REPL; applies edits only with --repo; /route /skills /exit |
+| `wg ask … --live --local` | 2 | local Ollama, keyless; down → exit 2 |
+| `wg run`, `feedback`, `evolve`, `report`, `proxy` | 3–5 | stub, exit 2 (`run`, `feedback`, `proxy` not registered) |
 
 `wastegate` and `wg` are the same entry point.
 

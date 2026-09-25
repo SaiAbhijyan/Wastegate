@@ -76,3 +76,17 @@ If a provider omits usage, `usage=None` and the log shows `tokens_in/out = null`
 | gemini | mid | `gemini-3.8-flash` | ai.google.dev/gemini-api/docs/models (Stable), docs/openai examples |
 | openrouter | cheap | `cohere/north-mini-code:free` | raw openrouter.ai/api/v1/models JSON + model page |
 | openrouter | mid | `qwen/qwen3.8-27b:free` | raw openrouter.ai/api/v1/models JSON + model page |
+
+## Local Ollama (added 2026-09-25)
+| item | value | status |
+|---|---|---|
+| endpoint | `http://127.0.0.1:11434/v1/chat/completions` | verified (docs.ollama.com/api/openai-compatibility: base `http://localhost:11434/v1/`) |
+| key | none; a placeholder `Bearer ollama` is sent | verified: docs say "required but ignored" |
+| usage (non-streaming) | parsed as OpenAI `prompt_tokens`/`completion_tokens` if present, else null | **unverified** |
+| model | `qwen2.5-coder:7b` (tier local) | tag seen on ollama.com/library/qwen2.5-coder, 2026-09-25; `ollama pull` it yourself |
+
+## HTTP User-Agent
+All provider HTTP sends `User-Agent: wastegate/<version>`. On 2026-09-25, api.groq.com (behind Cloudflare) returned 403 `error code: 1010` for Python-urllib's default User-Agent (results/20260925-live-smoke.md, try 1).
+
+## Groq usage fields as actually returned (2026-09-25, one run)
+`prompt_tokens`, `completion_tokens`, `total_tokens`, `completion_tokens_details.reasoning_tokens`, `prompt_time`, `completion_time`, `queue_time`, `total_time`. `tokens_out` includes reasoning tokens as billed by Groq's count.
