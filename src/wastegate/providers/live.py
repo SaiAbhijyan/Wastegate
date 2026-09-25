@@ -7,11 +7,12 @@ from .anthropic import AnthropicProvider
 from .base import LiveDisabled
 from .gemini import GeminiProvider
 from .groq import GroqProvider
+from .ollama import OllamaProvider
 from .openai import OpenAIProvider
 from .openrouter import OpenRouterProvider
 
 ADAPTERS = {"anthropic": AnthropicProvider, "openai": OpenAIProvider, "openrouter": OpenRouterProvider,
-            "groq": GroqProvider, "gemini": GeminiProvider}
+            "groq": GroqProvider, "gemini": GeminiProvider, "ollama": OllamaProvider}
 PAID_PROVIDERS = {"anthropic", "openai"}
 
 
@@ -24,9 +25,15 @@ def paid_allowed(flag: bool = False) -> bool:
     return flag or os.environ.get("ALLOW_PAID") == "1"
 
 
-def live_catalog(catalog: Catalog, allow_paid: bool = False) -> Catalog:
+def live_catalog(catalog: Catalog, allow_paid: bool = False, local: bool = False) -> Catalog:
     """Rows whose provider key is set; paid rows dropped unless --allow-paid / ALLOW_PAID=1.
+    local=True: only keyless local (Ollama) rows; cloud keys ignored.
     --live never silently falls back to another provider."""
+    if local:
+        sub = catalog.for_providers({"ollama"})
+        if not sub.models:
+            raise LiveDisabled("no local (ollama) model in catalog")
+        return sub
     keyed = {name for name, cls in ADAPTERS.items() if any(os.environ.get(v) for v in cls.key_envs)}
     sub = catalog.for_providers(keyed)
     if not sub.models:

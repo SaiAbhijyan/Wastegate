@@ -46,6 +46,12 @@ STATE = Path(".wastegate")
 BACKENDS = {"heuristic": HeuristicSystemOne, "laya": LayaSystemOne, "jev": JevSystemOne}
 
 
+def cloud_catalog():
+    """Catalog for non-live views (route/prompt/dry-run): local Ollama rows only appear with --live --local."""
+    c = load_catalog()
+    return c.for_providers({m.provider for m in c.models} - {"ollama"})
+
+
 def _gate_and_route(prompt: str, backend: Optional[str]):
     cfg = cfgmod.load()
     name = backend or cfg.get("systemone", {}).get("backend", "heuristic")
@@ -59,7 +65,7 @@ def _gate_and_route(prompt: str, backend: Optional[str]):
         out.print(f"{name}: {e}")
         raise typer.Exit(2)
     ms = round((time.perf_counter() - t0) * 1000, 2)
-    return name, gate, do_route(gate, load_catalog(), cfgmod.router_config(cfg)), ms
+    return name, gate, do_route(gate, cloud_catalog(), cfgmod.router_config(cfg)), ms
 
 
 def _gate_dict(gate) -> dict:
@@ -180,6 +186,7 @@ def ask(text: str,
         mock: bool = typer.Option(False, "--mock", help="scripted replies, no network"),
         live: bool = typer.Option(False, "--live", help="allow network; needs the provider key in env"),
         allow_paid: bool = typer.Option(False, "--allow-paid", help="with --live: allow paid keys/models (or ALLOW_PAID=1)"),
+        local: bool = typer.Option(False, "--local", help="with --live: use local Ollama only (no key)"),
         replies: Optional[Path] = typer.Option(None, help="dir with <role>.md replies (with --mock)"),
         repo: Path = typer.Option(Path("."), help="repo the driver edits and tests run in")):
     """One-shot routed task: --dry-run, --mock, or --live (exactly one)."""
@@ -191,14 +198,17 @@ def ask(text: str,
         out.print("live not enabled (no-flag generation not implemented); use --dry-run, --mock or --live")
         raise typer.Exit(2)
     mode = modes[0]
+    if local and mode != "live":
+        out.print("--local needs --live")
+        raise typer.Exit(2)
     if mode == "mock" and replies is None:
         out.print("--mock needs --replies DIR")
         raise typer.Exit(2)
     cfg = cfgmod.load()
     name = cfg.get("systemone", {}).get("backend", "heuristic")
     try:
-        catalog = {"mock": mock_catalog, "dry-run": load_catalog,
-                   "live": lambda: live_catalog(load_catalog(), allow_paid=allow_paid)}[mode]()
+        catalog = {"mock": mock_catalog, "dry-run": cloud_catalog,
+                   "live": lambda: live_catalog(load_catalog(), allow_paid=allow_paid, local=local)}[mode]()
     except LiveDisabled as e:
         out.print(f"live: {e}")
         raise typer.Exit(2)

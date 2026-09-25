@@ -121,3 +121,12 @@ provider = "openrouter"
 name = "Qwen3.8 27B (free) via OpenRouter"
 verified = false
 source = "openrouter.ai/api/v1/models raw JSON (pricing 0/0) + model page, 2026-09-24; tier = our judgment"
+
+# Local, keyless. Tag seen on ollama.com/library/qwen2.5-coder (2026-09-25). You must `ollama pull` it.
+[[model]]
+tier = "local"
+id = "qwen2.5-coder:7b"
+provider = "ollama"
+name = "Qwen2.5-Coder 7B (local Ollama)"
+verified = false
+source = "ollama.com/library/qwen2.5-coder tag list, 2026-09-25; runs locally, no key"
