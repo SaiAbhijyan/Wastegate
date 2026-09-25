@@ -66,7 +66,7 @@ def test_cli_transcript_redacts_planted_key(repo, tmp_path, monkeypatch):
     shutil.copytree(FIXTURES / "replies" / "fix_add", replies)
     (replies / "skeptic.md").write_text(f"VERDICT: reject\n- tiny_pkg/__init__.py: leaked {secret}\n")
     monkeypatch.chdir(tmp_path)
-    r = runner.invoke(app, ["ask", "--mock", "--replies", str(replies), "--repo", str(repo), PROMPT])
+    r = runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(replies), "--repo", str(repo), PROMPT])
     assert r.exit_code == 0, r.output
     assert "[REDACTED]" in r.output and secret not in r.output
     assert secret not in (tmp_path / ".wastegate/logs/turns.jsonl").read_text()
@@ -130,7 +130,7 @@ def test_free_keys_redacted_in_jsonl_and_smoke(tmp_path, monkeypatch, var):
 def test_live_no_keys_cwd_repo_unchanged(repo, monkeypatch):
     monkeypatch.chdir(repo)
     before = snapshot(repo)
-    r = runner.invoke(app, ["ask", "--live", PROMPT])
+    r = runner.invoke(app, ["ask", "--oneshot", "--live", PROMPT])
     assert r.exit_code == 2 and "no key or --live not set" in r.output
     assert snapshot(repo) == before
     assert not (repo / ".wastegate").exists() and not (repo / "results").exists()
@@ -138,5 +138,5 @@ def test_live_no_keys_cwd_repo_unchanged(repo, monkeypatch):
 
 # C6: all three modes together
 def test_three_modes_together_exit_2():
-    r = runner.invoke(app, ["ask", "--dry-run", "--mock", "--live", "--replies", "x", PROMPT])
+    r = runner.invoke(app, ["ask", "--oneshot", "--dry-run", "--mock", "--live", "--replies", "x", PROMPT])
     assert r.exit_code == 2 and "choose one" in r.output

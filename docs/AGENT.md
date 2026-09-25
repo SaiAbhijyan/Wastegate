@@ -2,6 +2,10 @@
 
 Status 2026-09-25: implemented with **mocks only**. No live agent run yet.
 
+The loop is the default for `wg ask --repo` / `wg run --repo` and `wg chat --repo`. `--oneshot` keeps the older single-reply path.
+
+Action syntax: `<<<TOOL name\narg\n>>>` or a single line `TOOL name arg`, optionally inside markdown fences. `grep` takes an optional second line that scopes the search to a path.
+
 ## Loop
 ```text
 prompt + --repo

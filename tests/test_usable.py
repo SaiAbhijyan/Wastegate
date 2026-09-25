@@ -46,7 +46,7 @@ def test_off_by_one_fixture_really_fails(obo):
 
 def test_mock_ask_fixes_off_by_one(obo, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    r = runner.invoke(app, ["ask", "--mock", "--replies", str(FIXTURES / "replies/off_by_one"), "--repo", str(obo),
+    r = runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(FIXTURES / "replies/off_by_one"), "--repo", str(obo),
                             "fix the off-by-one in sliding_windows"])
     assert r.exit_code == 0, r.output
     rec = last(tmp_path)

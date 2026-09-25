@@ -27,7 +27,7 @@ class Skill:
 
 
 def parse_skill(path: Path) -> tuple[dict, str]:
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
         raise ValueError(f"{path}: missing YAML frontmatter")
     _, fm, body = text.split("---\n", 2)
@@ -41,7 +41,7 @@ def _sidecar_provenance(d: Path) -> dict:
     """provenance.toml next to SKILL.md (used when SKILL.md must stay byte-exact, e.g. user-supplied text)."""
     from ..catalog import tomllib
     p = d / "provenance.toml"
-    return tomllib.loads(p.read_text()) if p.is_file() else {}
+    return tomllib.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
 
 
 def load_skill_dir(d: Path, imported: bool = False) -> Skill:

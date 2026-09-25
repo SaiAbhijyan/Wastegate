@@ -15,7 +15,7 @@ class MockProvider:
             raise FileNotFoundError(f"no scripted reply: {self.path}")
 
     def complete(self, model_id: str, system: str, messages: list[dict], max_tokens: int) -> Completion:
-        return Completion(self.path.read_text(), self.name, model_id, usage=None)
+        return Completion(self.path.read_text(encoding="utf-8"), self.name, model_id, usage=None)
 
 
 def mock_providers(replies_dir: Path):

@@ -30,7 +30,7 @@ TEST_LINE = re.compile(r"^\s*(def test_|async def test_|assert\b)")
 
 def harness_body() -> str:
     """verification-harness SKILL.md below its frontmatter (the skill says to paste exactly that part)."""
-    text = (builtin_root() / "verification-harness" / "SKILL.md").read_text()
+    text = (builtin_root() / "verification-harness" / "SKILL.md").read_text(encoding="utf-8")
     return text.split("---\n", 2)[2] if text.startswith("---\n") else text
 
 
@@ -75,10 +75,26 @@ def build_system(composed_system: str, plan: AgentPlan, repo: Path) -> str:
     return "\n".join(parts)
 
 
+TOOL_LINE = re.compile(r"^[ \t]*TOOL[ \t]+(read|grep|edit|pytest|shell)\b[ \t]*(.*)$", re.MULTILINE)
+FENCE_LINE = re.compile(r"^[ \t]*```[\w+-]*[ \t]*$\n?", re.MULTILINE)
+
+
 def parse_action(text: str) -> tuple[str, str]:
-    """-> (kind, arg): kind is a tool name, 'edit', 'done', or 'final' (no action)."""
+    """-> (kind, arg): kind is a tool name, 'edit', 'done', or 'final' (no action).
+    Accepts <<<TOOL name\\narg\\n>>> and single-line `TOOL name arg`; retries with markdown fences removed."""
+    kind, arg = _parse_action(text)
+    if kind == "final" and "```" in text:
+        k2, a2 = _parse_action(FENCE_LINE.sub("", text))
+        if k2 != "final":
+            return k2, a2
+    return kind, arg
+
+
+def _parse_action(text: str) -> tuple[str, str]:
     found = []
     for m in TOOL_BLOCK.finditer(text):
+        found.append((m.start(), m.group(1), m.group(2).strip()))
+    for m in TOOL_LINE.finditer(text):
         found.append((m.start(), m.group(1), m.group(2).strip()))
     for rx in (REPLACE_BLOCK, FILE_BLOCK):
         m = rx.search(text)
@@ -98,7 +114,7 @@ def tamper_flags(repo: Path, originals: dict) -> list[str]:
     flags = []
     for rel, orig in originals.items():
         p = repo / rel
-        new = p.read_text() if p.is_file() else None
+        new = p.read_text(encoding="utf-8") if p.is_file() else None
         is_test = bool(TEST_PATH.search(rel))
         if is_test and orig is not None and new is None:
             flags.append(f"{rel}: test file deleted")

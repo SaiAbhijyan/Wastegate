@@ -27,7 +27,7 @@ def last_log(tmp_path):
 
 
 def test_dry_run_no_generation(repo, tmp_path):
-    r = runner.invoke(app, ["ask", "--dry-run", "--repo", str(repo), PROMPT])
+    r = runner.invoke(app, ["ask", "--oneshot", "--dry-run", "--repo", str(repo), PROMPT])
     assert r.exit_code == 0, r.output
     assert "generation: (empty, dry-run)" in r.output and "karpathy" in r.output
     rec = last_log(tmp_path)
@@ -38,7 +38,7 @@ def test_dry_run_no_generation(repo, tmp_path):
 
 
 def test_mock_fixes_fixture(repo, tmp_path):
-    r = runner.invoke(app, ["ask", "--mock", "--replies", str(FIXTURES / "replies" / "fix_add"),
+    r = runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(FIXTURES / "replies" / "fix_add"),
                             "--repo", str(repo), PROMPT])
     assert r.exit_code == 0, r.output
     rec = last_log(tmp_path)
@@ -58,7 +58,7 @@ def test_mock_fixes_fixture(repo, tmp_path):
 
 
 def test_mock_reject_reports_unresolved_without_frontier(repo, tmp_path):
-    r = runner.invoke(app, ["ask", "--mock", "--replies", str(FIXTURES / "replies" / "reject"),
+    r = runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(FIXTURES / "replies" / "reject"),
                             "--repo", str(repo), PROMPT])
     assert r.exit_code == 0, r.output
     rec = last_log(tmp_path)
@@ -68,7 +68,7 @@ def test_mock_reject_reports_unresolved_without_frontier(repo, tmp_path):
 
 
 def test_path_traversal_rejected(repo, tmp_path):
-    r = runner.invoke(app, ["ask", "--mock", "--replies", str(FIXTURES / "replies" / "traversal"),
+    r = runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(FIXTURES / "replies" / "traversal"),
                             "--repo", str(repo), PROMPT])
     assert r.exit_code != 0
     assert not (tmp_path / "evil.py").exists()
@@ -76,18 +76,18 @@ def test_path_traversal_rejected(repo, tmp_path):
 
 
 def test_mode_required(repo):
-    r = runner.invoke(app, ["ask", PROMPT])
+    r = runner.invoke(app, ["ask", "--oneshot", PROMPT])
     assert r.exit_code == 2 and "not implemented" in r.output
-    r = runner.invoke(app, ["ask", "--dry-run", "--mock", "--replies", "x", PROMPT])
+    r = runner.invoke(app, ["ask", "--oneshot", "--dry-run", "--mock", "--replies", "x", PROMPT])
     assert r.exit_code == 2
 
 
 def test_mock_requires_replies(repo):
-    assert runner.invoke(app, ["ask", "--mock", PROMPT]).exit_code == 2
+    assert runner.invoke(app, ["ask", "--oneshot", "--mock", PROMPT]).exit_code == 2
 
 
 def test_missing_reply_aborts_before_any_write(repo, tmp_path):
-    r = runner.invoke(app, ["ask", "--mock", "--replies", str(FIXTURES / "replies" / "no_skeptic"),
+    r = runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(FIXTURES / "replies" / "no_skeptic"),
                             "--repo", str(repo), PROMPT])
     assert r.exit_code == 1 and "no edits written" in r.output
     assert (repo / "tiny_pkg" / "__init__.py").read_text().strip().endswith("a - b")

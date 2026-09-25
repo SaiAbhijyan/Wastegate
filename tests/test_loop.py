@@ -23,7 +23,7 @@ def repo(tmp_path):
 
 def ask(replies, repo, tmp_path, monkeypatch, prompt=PROMPT):
     monkeypatch.chdir(tmp_path)
-    r = runner.invoke(app, ["ask", "--mock", "--replies", str(FIXTURES / "replies" / replies), "--repo", str(repo), prompt])
+    r = runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(FIXTURES / "replies" / replies), "--repo", str(repo), prompt])
     assert r.exit_code == 0, r.output
     return r, json.loads((tmp_path / ".wastegate/logs/turns.jsonl").read_text().splitlines()[-1])
 
@@ -57,7 +57,7 @@ def test_no_followup_when_tests_passed_from_start(repo, tmp_path, monkeypatch):
     shutil.copy(FIXTURES / "replies/followup/driver_followup.md", d / "driver_followup.md")
     (d / "skeptic.md").write_text("VERDICT: approve\n")
     monkeypatch.chdir(tmp_path)
-    runner.invoke(app, ["ask", "--mock", "--replies", str(d), "--repo", str(repo), PROMPT])
+    runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(d), "--repo", str(repo), PROMPT])
     rec = json.loads((tmp_path / ".wastegate/logs/turns.jsonl").read_text().splitlines()[-1])
     assert rec["tests"]["before"] == 0
     assert rec["followup"]["ran"] is False and "passing from the start" in rec["followup"]["reason"]
@@ -71,7 +71,7 @@ def test_no_followup_when_driver_already_added_test(repo, tmp_path, monkeypatch)
     (d / "driver_followup.md").write_text("should not be used\n")
     (d / "skeptic.md").write_text("VERDICT: approve\n")
     monkeypatch.chdir(tmp_path)
-    runner.invoke(app, ["ask", "--mock", "--replies", str(d), "--repo", str(repo), PROMPT])
+    runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(d), "--repo", str(repo), PROMPT])
     rec = json.loads((tmp_path / ".wastegate/logs/turns.jsonl").read_text().splitlines()[-1])
     assert rec["followup"]["ran"] is False and "already" in rec["followup"]["reason"]
     assert "driver_followup" not in [c["role"] for c in rec["calls"]]

@@ -73,7 +73,7 @@ def test_ask_mock_with_replace_reply_fixes_fixture(repo, tmp_path, monkeypatch):
     (replies / "driver.md").write_text("Fix:\n" + rep(INIT, "    return a - b", "    return a + b"))
     (replies / "skeptic.md").write_text("VERDICT: approve\n")
     monkeypatch.chdir(tmp_path)
-    r = CliRunner().invoke(app, ["ask", "--mock", "--replies", str(replies), "--repo", str(repo), PROMPT])
+    r = CliRunner().invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(replies), "--repo", str(repo), PROMPT])
     assert r.exit_code == 0, r.output
     assert "tests: before=1 after=0" in r.output
 

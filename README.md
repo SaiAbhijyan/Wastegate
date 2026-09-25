@@ -32,31 +32,42 @@ wg init
 
 ## Quickstart
 
-### 1. Offline, no key: fix a real off-by-one with scripted replies
+### 1. Offline, no key: the verified tool loop on a real off-by-one
 
 Windows (PowerShell):
 
 ```powershell
 Copy-Item -Recurse tests\fixtures\off_by_one $env:TEMP\obo
-wg ask --mock --replies tests\fixtures\replies\off_by_one --repo $env:TEMP\obo "fix the off-by-one in sliding_windows"
+wg ask --mock --replies tests\fixtures\replies\agent_obo --repo $env:TEMP\obo "fix the off-by-one in sliding_windows"
 ```
 
 macOS / Linux:
 
 ```bash
 cp -r tests/fixtures/off_by_one /tmp/obo
-wg ask --mock --replies tests/fixtures/replies/off_by_one --repo /tmp/obo "fix the off-by-one in sliding_windows"
+wg ask --mock --replies tests/fixtures/replies/agent_obo --repo /tmp/obo "fix the off-by-one in sliding_windows"
 ```
 
-Expected output includes `edits: windows/__init__.py` and `tests: before=1 after=0`.
+Expected output:
+1. `[step 1] grep …`, `[step 2] edit windows/__init__.py`, `[step 3] pytest … exit 0`
+2. the driver reply
+3. `VERIFICATION: PASS` and `Checks: python -m pytest -q → exit 0`, with the baseline showing `exit 1` before the fix
 
-Other zero-key commands: `wg route "…"`, `wg prompt "…"`, `wg chat --dry-run` (`/route /skills /exit`), and `wg review -1 --note "prefer stdlib"` (saves an instinct for later turns). `wg run` is an alias of `wg ask`.
+Always copy a fixture first. Never point `--repo` at `tests/fixtures/...` itself: edits are written in place.
+
+`wg run` is an alias of `wg ask`. `--oneshot` keeps the older single-reply path: `wg ask --mock --oneshot --replies tests/fixtures/replies/off_by_one --repo <copy> "…"` prints `tests: before=1 after=0`.
+
+Other zero-key commands:
+- `wg route "…"`
+- `wg prompt "…"`
+- `wg chat --dry-run --repo <copy>` shows the model/tools/harness picks.
+- `wg review -1 --note "prefer stdlib"`
 
 ### 2. A free live model on your own folder
 
 Get a free Groq key at https://console.groq.com/keys. Set it **only as an environment variable** in your own terminal.
 
-**Never paste keys into chat, issues, or code, and never commit them.** Wastegate reads keys from the environment and redacts them from its logs.
+**Never paste keys into chat, issues, or code, and never commit them.** Wastegate reads keys from the environment. Its logs mask env key values and common key patterns (`gsk_…`, `sk-…`).
 
 Windows (PowerShell; applies to this terminal session only):
 
@@ -65,6 +76,7 @@ $env:GROQ_API_KEY = "<your key>"
 cd C:\path\to\your\project
 git status                      # start from a clean tree: edits are written in place
 wg ask --live --repo . "fix the failing test in foo.py and add a regression test"
+wg chat --live --repo .         # multi-turn, same loop
 git diff                        # review; `git checkout .` to undo
 ```
 
@@ -77,30 +89,10 @@ wg ask --live --repo . "fix the failing test in foo.py and add a regression test
 git diff
 ```
 
-`wg chat --live --repo .` does the same thing turn by turn.
-
-### 3. Agent loop: `wg chat --repo` (tool loop + verification gate)
-
-`wg chat --repo DIR` runs a tool loop. System One picks the model (from your live catalog), the tools, `max_steps` (default 8), and whether the verification harness loads. The model then works one action at a time: read, grep, edit, shell (allowlist) or pytest. It can't call the work done without a fresh passing test run after its last edit, and every turn ends with `VERIFICATION: PASS | NOT VERIFIED` and a `Checks:` line. Details: docs/AGENT.md.
-
-Offline, no key:
-
-```bash
-cp -r tests/fixtures/off_by_one /tmp/obo
-printf 'fix the off-by-one in sliding_windows\n/exit\n' | wg chat --mock --replies tests/fixtures/replies/agent_obo --repo /tmp/obo
-wg chat --dry-run --repo /tmp/obo          # shows the model/tools/harness picks, no generation
-```
-
-Live: `wg chat --live --repo .` (Groq, OpenRouter `:free`, or `--local` Ollama). `--oneshot` keeps the older single-reply edit path.
-
-What `wg ask --live --repo` does:
-1. gate → route → compose.
-2. The driver gets the edit format and a redacted, size-capped view of the folder.
-3. Edits are applied only if every edit resolves.
-4. Your tests run with `python -m pytest -q` before and after.
-5. One follow-up asks for a test file if you requested one and none was written.
-6. The tester and skeptic review the change.
-7. Unresolved items get one pass on the free mid model.
+What `--repo` does (both `ask` and `chat`), details in docs/AGENT.md:
+1. System One picks the model (from your live, free catalog), the tools, `max_steps` (default 8), and whether the verification harness loads.
+2. The model does one action per reply: read, grep, edit, shell (allowlist only: `git status|diff`, `pytest`, `python <file>.py`) or pytest.
+3. The harness decides the verdict, not the model. `VERIFICATION: PASS` needs a passing test run after the last edit. Skipping or weakening tests gives NOT VERIFIED. The repair cap is 5.
 
 Paid providers are ignored unless you pass `--allow-paid`. Local Ollama (no key): `--live --local`. Other free keys: docs/KEYS.md.
 

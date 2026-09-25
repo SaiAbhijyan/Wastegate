@@ -76,11 +76,11 @@ def scan_skill_dir(d: Path) -> ScanReport:
                 findings.append(Finding("size", "info", f"{size} bytes > {MAX_SKILL_BYTES}: exempt (user-supplied builtin)"))
             else:
                 findings.append(Finding("size", "high", f"{size} bytes > {MAX_SKILL_BYTES}"))
-        findings += scan_text(skill.read_text(errors="replace"))
+        findings += scan_text(skill.read_text(errors="replace", encoding="utf-8"))
     for f in sorted(d.rglob("*")):
         if f.is_file() and f.name != "SKILL.md":
             if f.suffix.lower() in SCRIPT_EXT or f.stat().st_mode & 0o111:
                 findings.append(Finding("script", "high", str(f.relative_to(d))))
             elif f.suffix.lower() in {".md", ".txt"}:
-                findings += scan_text(f.read_text(errors="replace"))
+                findings += scan_text(f.read_text(errors="replace", encoding="utf-8"))
     return ScanReport(tuple(findings))

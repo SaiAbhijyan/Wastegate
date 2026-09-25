@@ -33,7 +33,7 @@ def home() -> Path:
 
 def load() -> dict:
     p = home() / "config.toml"
-    return tomllib.loads(p.read_text() if p.exists() else DEFAULT_TOML)
+    return tomllib.loads(p.read_text(encoding="utf-8") if p.exists() else DEFAULT_TOML)
 
 
 def router_config(cfg: dict) -> RouterConfig:

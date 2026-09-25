@@ -20,7 +20,7 @@ def add_instinct(state_dir: Path, text: str, kind: Optional[str], source_turn: O
            "ts": datetime.now(timezone.utc).isoformat()}
     p = Path(state_dir) / FILE
     p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a") as f:
+    with p.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row) + "\n")
     return row
 
@@ -29,7 +29,7 @@ def load_instincts(state_dir: Path) -> list[dict]:
     p = Path(state_dir) / FILE
     if not p.exists():
         return []
-    return [json.loads(l) for l in p.read_text().splitlines() if l.strip()]
+    return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
 def select_instincts(rows: Sequence[dict], kind: Optional[str], k: int = 3) -> list[str]:

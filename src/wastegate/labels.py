@@ -22,7 +22,7 @@ class LabelRow:
 
 def load_labels(path: Path) -> list[LabelRow]:
     rows = []
-    for line in Path(path).read_text().splitlines():
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
         m = ROW.match(line)
         if m:
             rows.append(LabelRow(*m.groups()))
@@ -39,5 +39,5 @@ class PoolRow:
 
 
 def load_pool(path: Path) -> list[PoolRow]:
-    return [PoolRow(*m.groups()) for line in Path(path).read_text().splitlines()
+    return [PoolRow(*m.groups()) for line in Path(path).read_text(encoding="utf-8").splitlines()
             if (m := POOL_ROW.match(line))]

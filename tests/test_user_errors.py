@@ -37,8 +37,8 @@ def test_validate_repo_accepts_dir(tmp_path):
     assert validate_repo(tmp_path) == tmp_path
 
 
-@pytest.mark.parametrize("cmd", [["ask", "--mock", "--replies", "x"], ["ask", "--dry-run"], ["run", "--dry-run"],
-                                 ["ask", "--live"]])
+@pytest.mark.parametrize("cmd", [["ask", "--oneshot", "--mock", "--replies", "x"], ["ask", "--oneshot", "--dry-run"], ["run", "--dry-run"],
+                                 ["ask", "--oneshot", "--live"]])
 @pytest.mark.parametrize("raw", [r"C:\Users\nobody\no_such_repo", "/definitely/not/here/repo"])
 def test_cli_bad_repo_exit_2_no_traceback(tmp_path, monkeypatch, cmd, raw):
     monkeypatch.chdir(tmp_path)
@@ -67,7 +67,7 @@ def test_missing_pytest_exit_2_before_any_call_or_write(obo, tmp_path, monkeypat
     monkeypatch.setattr(cli_mod, "pytest_available", lambda: False)
     monkeypatch.chdir(tmp_path)
     before = (obo / "windows/__init__.py").read_text()
-    r = runner.invoke(app, ["ask", "--mock", "--replies", str(FIXTURES / "replies/off_by_one"), "--repo", str(obo), PROMPT])
+    r = runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(FIXTURES / "replies/off_by_one"), "--repo", str(obo), PROMPT])
     assert r.exit_code == 2 and "pip install pytest" in r.output and "Traceback" not in r.output
     assert 'pip install -e ".[dev]"' in r.output  # not eaten by rich markup
     assert (obo / "windows/__init__.py").read_text() == before
@@ -85,7 +85,7 @@ def test_missing_pytest_chat_with_repo_exit_2(obo, tmp_path, monkeypatch):
 def test_missing_pytest_irrelevant_for_dry_run(tmp_path, monkeypatch):
     monkeypatch.setattr(cli_mod, "pytest_available", lambda: False)
     monkeypatch.chdir(tmp_path)
-    assert runner.invoke(app, ["ask", "--dry-run", PROMPT]).exit_code == 0
+    assert runner.invoke(app, ["ask", "--oneshot", "--dry-run", PROMPT]).exit_code == 0
 
 
 def test_pytest_available_is_true_here():
@@ -94,7 +94,7 @@ def test_pytest_available_is_true_here():
 
 def test_failing_repo_tests_are_not_an_error(obo, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    r = runner.invoke(app, ["ask", "--mock", "--replies", str(FIXTURES / "replies/off_by_one"), "--repo", str(obo), PROMPT])
+    r = runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(FIXTURES / "replies/off_by_one"), "--repo", str(obo), PROMPT])
     assert r.exit_code == 0 and "tests: before=1 after=0" in r.output
 
 

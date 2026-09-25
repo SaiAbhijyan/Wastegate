@@ -22,7 +22,7 @@ def repo(tmp_path, monkeypatch):
 
 
 def run(replies, repo):
-    return runner.invoke(app, ["ask", "--mock", "--replies", str(FIXTURES / "replies" / replies),
+    return runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(FIXTURES / "replies" / replies),
                                "--repo", str(repo), PROMPT])
 
 

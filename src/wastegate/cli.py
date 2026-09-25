@@ -18,10 +18,10 @@ from . import config as cfgmod
 from .catalog import load_catalog, mock_catalog
 from .compose import compose
 from .instincts import add_instinct, load_instincts, select_instincts
-from .chat import ChatSession, reply_lines
+from .chat import ChatSession, agent_turn, reply_lines
 from .systemone.agent_gate import agent_catalog
 from .log import TurnLogger, redact
-from .pipeline import RepoError, UnsafeEdit, run_ask, validate_repo
+from .pipeline import RepoError, UnsafeEdit, plan_turn, run_ask, validate_repo
 from .providers.base import LiveDisabled
 from .providers.live import live_catalog, live_providers
 from .smoke import write_smoke_report
@@ -127,7 +127,7 @@ def init():
         out.print(f"exists: {p} (no API key needed)")
         return
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(cfgmod.DEFAULT_TOML)
+    p.write_text(cfgmod.DEFAULT_TOML, encoding="utf-8")
     out.print(f"wrote {p} (no API key needed; keys are read from env vars only, see docs/KEYS.md)")
 
 
@@ -241,14 +241,20 @@ def ask(text: str,
         live: bool = typer.Option(False, "--live", help="allow network; needs the provider key in env"),
         allow_paid: bool = typer.Option(False, "--allow-paid", help="with --live: allow paid keys/models (or ALLOW_PAID=1)"),
         local: bool = typer.Option(False, "--local", help="with --live: use local Ollama only (no key)"),
-        replies: Optional[Path] = typer.Option(None, help="dir with <role>.md replies (with --mock)"),
-        repo: Path = typer.Option(Path("."), help="repo the driver edits and tests run in")):
-    """One-shot routed task: --dry-run, --mock, or --live (exactly one)."""
+        replies: Optional[Path] = typer.Option(None, help="dir with <role>.md / agent_<n>.md replies (with --mock)"),
+        repo: Optional[Path] = typer.Option(None, help="work in this folder with the verified tool loop (default: one-shot in cwd)"),
+        oneshot: bool = typer.Option(False, "--oneshot", help="with --repo: old one-shot dump path instead of the tool loop"),
+        max_steps: Optional[int] = typer.Option(None, "--max-steps", help="tool-loop step cap (default [agent] max_steps or 8)")):
+    """Routed task: --dry-run, --mock, or --live (exactly one). With --repo: agent tool loop + VERIFICATION."""
     _check_repo(repo)
     mode, catalog, providers = _resolve_mode(dry_run, mock, live, local, allow_paid, replies)
     _check_pytest(mode)
     cfg = cfgmod.load()
     name = cfg.get("systemone", {}).get("backend", "heuristic")
+    if repo is not None and not oneshot:
+        _ask_loop(text, repo, mode, catalog, providers, cfg, name, max_steps)
+        return
+    repo = repo or Path(".")
     try:
         res = run_ask(text, repo, BACKENDS[name](), catalog, cfgmod.router_config(cfg), load_builtin(),
                       mode=mode, providers=providers, instincts=load_instincts(STATE))
@@ -269,6 +275,32 @@ def ask(text: str,
     if mode == "live":
         p = write_smoke_report(res.record, Path("results"), datetime.now(timezone.utc).strftime("%Y%m%d"))
         out.print(f"smoke report: {p}")
+
+
+def _ask_loop(text, repo, mode, catalog, providers, cfg, name, max_steps):
+    try:
+        catalog = agent_catalog(catalog)
+    except LiveDisabled as e:
+        out.print(f"{mode}: {e}", markup=False)
+        raise typer.Exit(2)
+    rcfg = cfgmod.router_config(cfg)
+    s1 = BACKENDS[name]()
+    try:
+        plan = plan_turn(text, s1, catalog, rcfg, load_builtin(), load_instincts(STATE))
+        lines, rec, _ = agent_turn(text, plan, s1, catalog, rcfg, providers, repo,
+                                   max_steps or int(cfg.get("agent", {}).get("max_steps", 8)), f"ask-agent-{mode}")
+    except (NotImplementedError, LiveDisabled) as e:
+        out.print(f"{mode}: {redact(str(e))}", markup=False)
+        raise typer.Exit(2)
+    except urllib.error.URLError as e:  # live only; edits from earlier steps may be applied
+        out.print(f"provider error (edits may already be applied in {repo}): {redact(str(e))}", markup=False)
+        raise typer.Exit(1)
+    TurnLogger(Path(".wastegate/logs")).write(rec)
+    for line in lines:
+        out.print(redact(line), markup=False)
+    if mode == "live":
+        p = write_smoke_report(rec, Path("results"), datetime.now(timezone.utc).strftime("%Y%m%d"))
+        out.print(f"smoke report: {p}", markup=False)
 
 
 app.command("run", help="Alias of `wg ask` (same flags): one-shot routed task. "
@@ -387,7 +419,7 @@ def label_new(out_path: Path = typer.Option(..., "--out", help="append-only JSON
     pool_sha = hashlib.sha256(pool.read_bytes()).hexdigest()
     done = set()
     if out_path.exists():
-        done = {json.loads(l)["id"] for l in out_path.read_text().splitlines() if l.strip()}
+        done = {json.loads(l)["id"] for l in out_path.read_text(encoding="utf-8").splitlines() if l.strip()}
     todo = [r for r in rows if r.id not in done]
     kinds = _GQ["kind"].options
     out.print(f"{len(todo)} unlabeled of {len(rows)}. Rubric: evals/route_quality/labels.md (kind). "
@@ -405,7 +437,7 @@ def label_new(out_path: Path = typer.Option(..., "--out", help="append-only JSON
         if ans == "s":
             continue
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("a") as f:
+        with out_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"id": r.id, "prompt": r.prompt, "kind": ans, "labeler": labeler,
                                 "read_heuristic": read, "pool_sha256": pool_sha,
                                 "rubric": "labels.md kind v1",

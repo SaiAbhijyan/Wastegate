@@ -35,7 +35,7 @@ def replies(tmp_path, text):
 
 def test_mock_ask_prints_driver_body_before_gate(obo, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    r = runner.invoke(app, ["ask", "--mock", "--replies", str(FIXTURES / "replies/off_by_one"), "--repo", str(obo), PROMPT])
+    r = runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(FIXTURES / "replies/off_by_one"), "--repo", str(obo), PROMPT])
     assert r.exit_code == 0, r.output
     assert BODY in r.output
     assert r.output.index(BODY) < r.output.index("gate:")
@@ -44,7 +44,7 @@ def test_mock_ask_prints_driver_body_before_gate(obo, tmp_path, monkeypatch):
 
 def test_dry_run_says_no_generation_before_gate(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    r = runner.invoke(app, ["ask", "--dry-run", PROMPT])
+    r = runner.invoke(app, ["ask", "--oneshot", "--dry-run", PROMPT])
     assert r.exit_code == 0
     assert "no generation" in r.output and r.output.index("no generation") < r.output.index("gate:")
     assert last(tmp_path)["driver_text"] is None
@@ -54,7 +54,7 @@ def test_driver_text_redacted_in_output_and_log(obo, tmp_path, monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "gsk-driver-echo-31337")
     d = replies(tmp_path, "Here is your key gsk-driver-echo-31337, no edits.\n")
     monkeypatch.chdir(tmp_path)
-    r = runner.invoke(app, ["ask", "--mock", "--replies", str(d), "--repo", str(obo), PROMPT])
+    r = runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(d), "--repo", str(obo), PROMPT])
     assert r.exit_code == 0, r.output
     raw = (tmp_path / ".wastegate/logs/turns.jsonl").read_text()
     assert "gsk-driver-echo-31337" not in r.output and "gsk-driver-echo-31337" not in raw
@@ -64,7 +64,7 @@ def test_driver_text_redacted_in_output_and_log(obo, tmp_path, monkeypatch):
 def test_driver_text_capped_at_4k(obo, tmp_path, monkeypatch):
     d = replies(tmp_path, "x" * 10_000 + "\n")
     monkeypatch.chdir(tmp_path)
-    runner.invoke(app, ["ask", "--mock", "--replies", str(d), "--repo", str(obo), PROMPT])
+    runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(d), "--repo", str(obo), PROMPT])
     assert len(last(tmp_path)["driver_text"]) <= 4000
 
 
@@ -87,6 +87,6 @@ def test_chat_dry_run_no_generation(tmp_path, monkeypatch):
 def test_terminal_shows_full_reply_log_is_capped(obo, tmp_path, monkeypatch):
     d = replies(tmp_path, "y" * 6_000 + "END_MARK\n")
     monkeypatch.chdir(tmp_path)
-    r = runner.invoke(app, ["ask", "--mock", "--replies", str(d), "--repo", str(obo), PROMPT])
+    r = runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(d), "--repo", str(obo), PROMPT])
     assert "END_MARK" in r.output
     assert len(last(tmp_path)["driver_text"]) == 4000 and "END_MARK" not in last(tmp_path)["driver_text"]

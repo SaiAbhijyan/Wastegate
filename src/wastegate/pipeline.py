@@ -126,7 +126,7 @@ def parse_edits(text: str, repo: Path) -> list[tuple[str, str]]:
         if rel not in content:
             if not path.is_file():
                 raise EditError(f"REPLACE target does not exist: {rel}")
-            content[rel] = path.read_text()
+            content[rel] = path.read_text(encoding="utf-8")
         n = content[rel].count(old)
         if n != 1:
             raise EditError(f"REPLACE old text in {rel} " + ("not found" if n == 0 else f"found {n} times"))
@@ -137,7 +137,7 @@ def parse_edits(text: str, repo: Path) -> list[tuple[str, str]]:
 def apply_edits(repo: Path, edits: list[tuple[str, str]]) -> None:
     for rel, body in edits:
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
-        (repo / rel).write_text(body)
+        (repo / rel).write_text(body, encoding="utf-8")
 
 
 def repo_context(repo: Path, budget: int = 24_000, max_file: int = 8_000) -> str:
@@ -157,7 +157,7 @@ def repo_context(repo: Path, budget: int = 24_000, max_file: int = 8_000) -> str
         if p.stat().st_size > max_file:
             continue
         try:
-            body = p.read_text()
+            body = p.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
         block = f"<file path=\"{p.relative_to(root).as_posix()}\">\n{body}</file>\n"
@@ -241,7 +241,7 @@ def _review_brief(prompt: str, originals: Mapping[str, Optional[str]], repo: Pat
     from .log import redact
     orig = "".join(f"<original path=\"{rel}\">\n{text if text is not None else '(new file)'}</original>\n"
                    for rel, text in originals.items())
-    new = "".join(f"<edited path=\"{rel}\">\n{(repo / rel).read_text()}</edited>\n" for rel in originals)
+    new = "".join(f"<edited path=\"{rel}\">\n{(repo / rel).read_text(encoding='utf-8')}</edited>\n" for rel in originals)
     return redact(f"User request: {prompt}\nOriginal files:\n{orig[:cap]}\nEdited files:\n{new[:cap]}\n"
                   f"Repo tests exit code: before={before} after={after} (0 = pass)\n")
 
@@ -250,7 +250,7 @@ def _snapshot(repo: Path, edits: list[tuple[str, str]], originals: dict) -> None
     for rel, _ in edits:
         if rel not in originals:
             p = repo / rel
-            originals[rel] = p.read_text() if p.is_file() else None
+            originals[rel] = p.read_text(encoding="utf-8") if p.is_file() else None
 
 
 def run_followup(prompt: str, touched: list[str], before: int, after: int, fu_p, why_fu: str, model: str,

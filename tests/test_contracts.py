@@ -85,7 +85,7 @@ def repo(tmp_path):
 
 def run(replies, repo, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    r = runner.invoke(app, ["ask", "--mock", "--replies", str(FIXTURES / "replies" / replies), "--repo", str(repo), PROMPT])
+    r = runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(FIXTURES / "replies" / replies), "--repo", str(repo), PROMPT])
     assert r.exit_code == 0, r.output
     return r, json.loads((tmp_path / ".wastegate/logs/turns.jsonl").read_text().splitlines()[-1])
 
@@ -117,6 +117,6 @@ def test_test_file_changed_detected(repo, tmp_path, monkeypatch):
         "<<<FILE tests/test_regression.py\nfrom tiny_pkg import add\n\n\ndef test_neg():\n    assert add(-1, 1) == 0\n>>>\n")
     (d / "skeptic.md").write_text("VERDICT: approve\n")
     monkeypatch.chdir(tmp_path)
-    r = runner.invoke(app, ["ask", "--mock", "--replies", str(d), "--repo", str(repo), PROMPT])
+    r = runner.invoke(app, ["ask", "--oneshot", "--mock", "--replies", str(d), "--repo", str(repo), PROMPT])
     rec = json.loads((tmp_path / ".wastegate/logs/turns.jsonl").read_text().splitlines()[-1])
     assert rec["test_file_changed"] is True and rec["tests"]["after"] == 0

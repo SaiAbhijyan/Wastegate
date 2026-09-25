@@ -66,5 +66,5 @@ def write_smoke_report(record: dict, out_dir: Path, date: str) -> Path:
     body = redact("\n".join(lines))
     leaked = any(os.environ.get(v) and len(os.environ[v]) >= 6 and os.environ[v] in body for v in SECRET_ENV)
     body += f"\nredaction check: no configured key value present: {'no' if leaked else 'yes'}\n"
-    p.write_text(body)
+    p.write_text(body, encoding="utf-8")
     return p

@@ -27,6 +27,30 @@ def reply_lines(driver_text):
     return ["--- driver reply ---", driver_text.rstrip("\n"), "--- end driver reply ---"]
 
 
+def agent_turn(text: str, plan: Plan, s1, catalog: Catalog, cfg: RouterConfig, providers, repo: Path,
+               max_steps: int, mode_label: str, history=None):
+    """One agent-loop turn shared by `wg ask --repo` and `wg chat --repo`.
+    -> (lines to print: steps, driver reply, scoreboard, VERIFICATION; JSONL record; final text or None)."""
+    ap = agent_plan(text, s1, catalog, cfg, max_steps=max_steps, gate=plan.gate)
+    picks = (f"agent: model={ap.model_id} tools={','.join(ap.tools)} max_steps={ap.max_steps} "
+             f"harness={'on' if ap.harness else 'off'} tool_loop={ap.answers['tool_loop']['value']:.2f}")
+    rec = {**plan.record, "mode": mode_label, "driver_text": None,
+           "agent": {"model_id": ap.model_id, "tools": list(ap.tools), "max_steps": ap.max_steps,
+                     "harness": ap.harness, "answers": ap.answers}}
+    if providers is None:
+        return reply_lines(None) + list(plan.transcript) + [picks, "generation: (empty, dry-run)"], rec, None
+    system = build_system(plan.composed.system, ap, repo)
+    res = run_agent(text, repo, ap, providers, system, plan.route.driver.budget_tokens,
+                    history=history, tier=plan.route.driver.tier)
+    lines = (res.step_lines + reply_lines(cap_text(res.final_text, limit=None)) + list(plan.transcript)
+             + [picks] + verification_lines(res.verification))
+    rec.update(tool_calls=res.tool_calls, calls=res.calls, verification=res.verification,
+               stop_reason=res.stop_reason, driver_text=cap_text(res.final_text),
+               provider=res.calls[0]["provider"] if res.calls else None, model_id=ap.model_id,
+               tokens_in=_sum(res.calls, "tokens_in"), tokens_out=_sum(res.calls, "tokens_out"), usd=None)
+    return lines, rec, res.final_text
+
+
 class ChatSession:
     def __init__(self, s1: SystemOne, catalog: Catalog, cfg: RouterConfig, registry: Mapping[str, Skill],
                  providers: Optional[Callable[[str, Optional[str]], Provider]], repo: Optional[Path],
@@ -71,25 +95,11 @@ class ChatSession:
         return lines
 
     def _agent_turn(self, text: str, plan: Plan) -> list[str]:
-        ap = agent_plan(text, self.s1, self.catalog, self.cfg, max_steps=self.max_steps, gate=plan.gate)
-        picks = (f"agent: model={ap.model_id} tools={','.join(ap.tools)} max_steps={ap.max_steps} "
-                 f"harness={'on' if ap.harness else 'off'} tool_loop={ap.answers['tool_loop']['value']:.2f}")
-        rec = {**plan.record, "mode": f"chat-agent-{self.mode}", "turn": self.n, "driver_text": None,
-               "agent": {"model_id": ap.model_id, "tools": list(ap.tools), "max_steps": ap.max_steps,
-                         "harness": ap.harness, "answers": ap.answers}}
-        if self.providers is None:
-            lines = reply_lines(None) + list(plan.transcript) + [picks, "generation: (empty, dry-run)"]
-        else:
-            system = build_system(plan.composed.system, ap, self.repo)
-            res = run_agent(text, self.repo, ap, self.providers, system, plan.route.driver.budget_tokens,
-                            history=self.history[-HISTORY:], tier=plan.route.driver.tier)
-            lines = (res.step_lines + reply_lines(cap_text(res.final_text, limit=None)) + list(plan.transcript)
-                     + [picks] + verification_lines(res.verification))
-            rec.update(tool_calls=res.tool_calls, calls=res.calls, verification=res.verification,
-                       stop_reason=res.stop_reason, driver_text=cap_text(res.final_text),
-                       provider=res.calls[0]["provider"] if res.calls else None, model_id=ap.model_id,
-                       tokens_in=_sum(res.calls, "tokens_in"), tokens_out=_sum(res.calls, "tokens_out"), usd=None)
-            self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": res.final_text}]
+        lines, rec, final = agent_turn(text, plan, self.s1, self.catalog, self.cfg, self.providers, self.repo,
+                                       self.max_steps, f"chat-agent-{self.mode}", history=self.history[-HISTORY:])
+        rec["turn"] = self.n
+        if final is not None:
+            self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": final}]
         if self.state_dir:
             TurnLogger(self.state_dir / "logs").write(rec)
         return lines

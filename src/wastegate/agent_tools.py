@@ -41,7 +41,7 @@ def tool_read(repo: Path, rel: str) -> str:
     if not p.is_file():
         raise ToolError(f"not a file: {rel.strip()}")
     try:
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         raise ToolError(f"not a text file: {rel.strip()}")
     if len(text) > READ_CAP:
@@ -49,8 +49,11 @@ def tool_read(repo: Path, rel: str) -> str:
     return text
 
 
-def tool_grep(repo: Path, pattern: str, max_hits: int = MAX_HITS) -> str:
-    pattern = pattern.strip()
+def tool_grep(repo: Path, arg: str, max_hits: int = MAX_HITS) -> str:
+    """arg = 'pattern' or 'pattern\\npath' (second line scopes the search; path-guarded)."""
+    parts = arg.strip().split("\n", 1)
+    pattern = parts[0].strip()
+    scope = _path(repo, parts[1]) if len(parts) > 1 and parts[1].strip() else repo.resolve()
     try:
         rx = re.compile(pattern)
     except re.error as e:
@@ -58,18 +61,19 @@ def tool_grep(repo: Path, pattern: str, max_hits: int = MAX_HITS) -> str:
     hits: list[str] = []
     if shutil.which("rg"):
         r = subprocess.run(["rg", "-n", "--no-heading", "--color=never", "--glob", "!.git", "--glob", "!.wastegate",
-                            "-e", pattern], cwd=repo, capture_output=True, text=True, timeout=TIMEOUT)
+                            "-e", pattern, "--", scope.relative_to(repo.resolve()).as_posix() or "."], cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT)
         if r.returncode > 1:
             raise ToolError(f"grep failed: {r.stderr.strip()[:200]}")
         hits = [l[2:] if l.startswith("./") else l for l in r.stdout.splitlines()]
     else:
         root = repo.resolve()
-        for dirpath, dirnames, filenames in os.walk(root):
+        walk = [(str(scope.parent), [], [scope.name])] if scope.is_file() else os.walk(scope)
+        for dirpath, dirnames, filenames in walk:
             dirnames[:] = sorted(d for d in dirnames if d not in CONTEXT_SKIP_DIRS and not d.startswith("."))
             for name in sorted(filenames):
                 p = Path(dirpath) / name
                 try:
-                    lines = p.read_text().splitlines()
+                    lines = p.read_text(encoding="utf-8").splitlines()
                 except (UnicodeDecodeError, OSError):
                     continue
                 rel = p.relative_to(root).as_posix()
@@ -118,7 +122,7 @@ def _allowed(repo: Path, argv: list[str]) -> list[str]:
 def _run(repo: Path, argv: list[str]) -> tuple[int, str]:
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     try:
-        r = subprocess.run(argv, cwd=repo, env=env, capture_output=True, text=True, timeout=TIMEOUT)
+        r = subprocess.run(argv, cwd=repo, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
         return 124, f"timeout after {TIMEOUT}s"
     return r.returncode, _tail(r.stdout + r.stderr)

@@ -13,6 +13,7 @@ SECRET_ENV = ("TYPESAFE_API_KEY", "JEV_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_AP
               "GITHUB_TOKEN")
 PATTERNS = [
     re.compile(r"sk-[A-Za-z0-9_\-]{16,}"),
+    re.compile(r"gsk_[A-Za-z0-9]{20,}"),          # Groq keys (masked even when not in this env)
     re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"),
     re.compile(r"Bearer\s+[A-Za-z0-9._\-]+"),
     re.compile(r"AKIA[0-9A-Z]{16}"),
@@ -40,17 +41,17 @@ class TurnLogger:
                "usd": None, "calls": [], "review": None, **record}
         line = redact(json.dumps(rec, default=str, sort_keys=True))
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a") as f:
+        with self.path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
         return json.loads(line)
 
     def set_last_review(self, review: dict) -> dict:
         """Attach a review to the last turn. Raises FileNotFoundError if there is no turn."""
-        lines = self.path.read_text().splitlines() if self.path.exists() else []
+        lines = self.path.read_text(encoding="utf-8").splitlines() if self.path.exists() else []
         if not lines:
             raise FileNotFoundError(f"no logged turn in {self.path}")
         rec = json.loads(lines[-1])
         rec["review"] = review
         lines[-1] = redact(json.dumps(rec, default=str, sort_keys=True))
-        self.path.write_text("\n".join(lines) + "\n")
+        self.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return rec

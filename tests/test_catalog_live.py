@@ -79,7 +79,7 @@ def test_cli_live_openai_key_under_pytest_exits_2_without_writes(tmp_path, monke
     repo = tmp_path / "tiny_pkg"
     shutil.copytree(FIXTURES / "tiny_pkg", repo)
     monkeypatch.chdir(tmp_path)
-    r = CliRunner().invoke(app, ["ask", "--live", "--repo", str(repo), PROMPT])
+    r = CliRunner().invoke(app, ["ask", "--oneshot", "--live", "--repo", str(repo), PROMPT])
     assert r.exit_code == 2 and "network disabled under pytest" in r.output
     assert (repo / "tiny_pkg/__init__.py").read_text().strip().endswith("a - b")
     assert not (tmp_path / ".wastegate").exists() and not (tmp_path / "results").exists()
