@@ -16,6 +16,7 @@ from rich.table import Table
 from . import config as cfgmod
 from .catalog import load_catalog, mock_catalog
 from .compose import compose
+from .instincts import add_instinct, load_instincts, select_instincts
 from .log import TurnLogger, redact
 from .pipeline import UnsafeEdit, run_ask
 from .providers.base import LiveDisabled
@@ -41,6 +42,7 @@ app.add_typer(label_app, name="label")
 out = Console(highlight=False, soft_wrap=True)
 
 LABELS = Path("evals/route_quality/labels.md")
+STATE = Path(".wastegate")
 BACKENDS = {"heuristic": HeuristicSystemOne, "laya": LayaSystemOne, "jev": JevSystemOne}
 
 
@@ -97,8 +99,9 @@ def route(prompt: str, backend: Optional[str] = typer.Option(None, help="heurist
 @app.command()
 def prompt(text: str, backend: Optional[str] = typer.Option(None)):
     """Print the composed system prefix + user turn."""
-    _, _, r, _ = _gate_and_route(text, backend)
-    c = compose(r, text, load_builtin())
+    _, gate, r, _ = _gate_and_route(text, backend)
+    c = compose(r, text, load_builtin(),
+                instincts=select_instincts(load_instincts(STATE), str(gate["kind"].value)))
     out.print("=== system ===")
     out.print(c.system, markup=False)
     out.print("=== user ===")
@@ -203,7 +206,7 @@ def ask(text: str,
                  "live": live_providers(catalog, allow_network=True, allow_paid=allow_paid)}[mode]
     try:
         res = run_ask(text, repo, BACKENDS[name](), catalog, cfgmod.router_config(cfg), load_builtin(),
-                      mode=mode, providers=providers)
+                      mode=mode, providers=providers, instincts=load_instincts(STATE))
     except (NotImplementedError, LiveDisabled) as e:
         out.print(f"{mode}: {e}")
         raise typer.Exit(2)
@@ -231,18 +234,22 @@ def chat():
 def review(verdict_arg: Optional[str] = typer.Argument(None, metavar="VERDICT", help="+1 or -1"),
            verdict: Optional[str] = typer.Option(None, "--verdict", help="+1 or -1"),
            note: Optional[str] = typer.Option(None, "--note")):
-    """Stub: attach +1/-1 (and a note) to the last logged turn. Instincts are Phase 4."""
+    """Attach +1/-1 (and a note) to the last logged turn. -1 with --note saves an instinct."""
     given = [v for v in (verdict_arg, verdict) if v is not None]
     if len(given) != 1 or given[0] not in ("+1", "-1"):
         out.print("give exactly one verdict: +1 or -1 (positional or --verdict)")
         raise typer.Exit(2)
     try:
-        TurnLogger(Path(".wastegate/logs")).set_last_review(
+        rec = TurnLogger(Path(".wastegate/logs")).set_last_review(
             {"verdict": given[0], "note": note, "ts": datetime.now(timezone.utc).isoformat()})
     except FileNotFoundError as e:
         out.print(str(e))
         raise typer.Exit(1)
     out.print(f"review {given[0]} attached to last turn")
+    if given[0] == "-1" and note:
+        kind = ((rec.get("gate") or {}).get("kind") or {}).get("value")
+        add_instinct(STATE, note, kind, rec.get("turn_id"))
+        out.print(f"instinct saved ({kind or 'any'} tasks): injected into up to 3 relevant future turns")
 
 
 @app.command()

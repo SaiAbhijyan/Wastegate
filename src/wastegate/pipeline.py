@@ -12,6 +12,7 @@ from typing import Callable, Mapping, Optional, Sequence
 from .catalog import Catalog
 from .compose import Composed, compose
 from .escalate import escalate_slice
+from .instincts import select_instincts
 from .providers.base import Completion, Provider
 from .router import Route, RouterConfig, route
 from .skills.registry import Skill
@@ -165,11 +166,12 @@ class Plan:
 
 
 def plan_turn(prompt: str, s1: SystemOne, catalog: Catalog, cfg: RouterConfig,
-              registry: Mapping[str, Skill], instincts: Sequence[str] = ()) -> Plan:
-    """gate -> route -> compose. Shared by wg ask and wg chat. No provider calls."""
+              registry: Mapping[str, Skill], instincts: Sequence[dict] = ()) -> Plan:
+    """gate -> route -> compose. Shared by wg ask and wg chat. No provider calls.
+    instincts: stored rows; up to 3 relevant to the gated kind are injected."""
     gate = s1.decide(prompt, GATE_QUESTIONS)
     r = route(gate, catalog, cfg)
-    c = compose(r, prompt, registry, instincts=instincts)
+    c = compose(r, prompt, registry, instincts=select_instincts(instincts, str(gate["kind"].value)))
     record = {"prompt": prompt, "backend": s1.name, "route": r.to_dict(),
               "gate": {k: {"value": a.value, "confidence": a.confidence} for k, a in gate.items()},
               "skills": [{"id": s, "sha": registry[s].sha256} for s in c.included],
@@ -194,7 +196,7 @@ def driver_request(plan: Plan, prompt: str, repo: Optional[Path]) -> tuple[str, 
 def run_ask(prompt: str, repo: Path, s1: SystemOne, catalog: Catalog, cfg: RouterConfig,
             registry: Mapping[str, Skill], mode: str = "dry-run",
             providers: Optional[Callable[[str, Optional[str]], Provider]] = None,
-            instincts: Sequence[str] = ()) -> TurnResult:
+            instincts: Sequence[dict] = ()) -> TurnResult:
     """providers=None means dry-run: no generation."""
     plan = plan_turn(prompt, s1, catalog, cfg, registry, instincts)
     r, c = plan.route, plan.composed
