@@ -27,7 +27,12 @@ class ProviderHTTPError(urllib.error.URLError):
     def __init__(self, status: int, body: str):
         from ..log import redact
         self.status = status
-        self.body = redact(body)[:ERROR_BODY_CAP]
+        full = redact(body)
+        self.body = full[:ERROR_BODY_CAP]
+        try:  # uncapped parsed body, e.g. Groq's error.failed_generation for tool-call recovery
+            self.data = json.loads(full)
+        except ValueError:
+            self.data = None
         super().__init__(f"HTTP {status}: {self.body}")
 
     def __str__(self) -> str:
@@ -54,6 +59,7 @@ class LiveAdapter:
     name = ""
     key_envs: tuple[str, ...] = ()
     max_tokens_cap: Optional[int] = None  # set by live_providers from the catalog tier
+    supports_tools = False  # True: complete() accepts tools= (OpenAI function specs)
 
     def __init__(self, allow_network: bool = False, transport: Optional[Transport] = None):
         self.allow_network = allow_network
@@ -73,14 +79,20 @@ class LiveAdapter:
             raise LiveDisabled("network disabled under pytest")
         return key
 
-    def complete(self, model_id: str, system: str, messages: list[dict], max_tokens: int) -> Completion:
+    def complete(self, model_id: str, system: str, messages: list[dict], max_tokens: int,
+                 tools: Optional[list] = None) -> Completion:
         key = self.check()
         if self.max_tokens_cap:
             max_tokens = min(max_tokens, self.max_tokens_cap)
         url, headers, body = self.build(key, model_id, system, messages, max_tokens)
+        if tools and self.supports_tools:
+            body["tools"], body["tool_choice"] = tools, "auto"
         raw = (self._transport or post_json)(url, headers, body)
         text, usage = self.parse(raw)
-        return Completion(text, self.name, model_id, usage, raw)
+        return Completion(text, self.name, model_id, usage, raw, self.parse_tool_calls(raw))
+
+    def parse_tool_calls(self, raw: dict) -> tuple:
+        return ()
 
     def build(self, key, model_id, system, messages, max_tokens) -> tuple[str, dict, dict]:
         raise NotImplementedError
@@ -92,6 +104,7 @@ class LiveAdapter:
 class OpenAICompatible(LiveAdapter):
     url = ""
     max_tokens_field = "max_tokens"
+    supports_tools = True
 
     def build(self, key, model_id, system, messages, max_tokens):
         body = {"model": model_id, "messages": [{"role": "system", "content": system}, *messages],
@@ -104,3 +117,8 @@ class OpenAICompatible(LiveAdapter):
         if not u or u.get("prompt_tokens") is None or u.get("completion_tokens") is None:
             return text, None
         return text, Usage(int(u["prompt_tokens"]), int(u["completion_tokens"]))
+
+    def parse_tool_calls(self, raw):
+        calls = raw["choices"][0]["message"].get("tool_calls") or []
+        return tuple({"id": c.get("id", ""), "name": (c.get("function") or {}).get("name", ""),
+                      "arguments": (c.get("function") or {}).get("arguments") or ""} for c in calls)

@@ -18,12 +18,14 @@ class Completion:
     model_id: str
     usage: Optional[Usage]
     raw: Optional[dict] = None
+    tool_calls: tuple = ()  # native OpenAI-style calls: ({"id", "name", "arguments": raw JSON str}, ...)
 
 
 class Provider(Protocol):
     name: str
 
     def complete(self, model_id: str, system: str, messages: list[dict], max_tokens: int) -> Completion: ...
+    # Adapters with supports_tools = True also accept tools=[OpenAI function specs].
 
 
 class LiveDisabled(RuntimeError):

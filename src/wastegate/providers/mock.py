@@ -14,7 +14,7 @@ class MockProvider:
         if not self.path.exists():
             raise FileNotFoundError(f"no scripted reply: {self.path}")
 
-    def complete(self, model_id: str, system: str, messages: list[dict], max_tokens: int) -> Completion:
+    def complete(self, model_id: str, system: str, messages: list[dict], max_tokens: int, tools=None) -> Completion:
         return Completion(self.path.read_text(encoding="utf-8"), self.name, model_id, usage=None)
 
 

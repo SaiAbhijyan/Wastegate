@@ -5,7 +5,9 @@ after the last edit (docs/AGENT.md).
 """
 from __future__ import annotations
 
+import json
 import re
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -19,6 +21,7 @@ from .skills.registry import builtin_root
 from .systemone.agent_gate import AgentPlan, load_harness  # noqa: F401  (re-exported)
 
 REPAIR_CAP = 5
+MAX_RECOVERIES = 2  # Groq tool_use_failed 400s turned back into actions per loop
 RESULT_CAP = 4_000
 TOOL_BLOCK = re.compile(r"^<<<TOOL (\w+)[ \t]*\n(.*?)^>>>[ \t]*$", re.DOTALL | re.MULTILINE)
 DONE_BLOCK = re.compile(r"^<<<DONE[ \t]*\n(.*?)^>>>[ \t]*$", re.DOTALL | re.MULTILINE)
@@ -155,6 +158,74 @@ def _passed(output: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def _fn(name: str, desc: str, props: dict, required: list) -> dict:
+    return {"type": "function", "function": {"name": name, "description": desc, "parameters":
+            {"type": "object", "properties": props, "required": required}}}
+
+
+_S = {"type": "string"}
+TOOL_SCHEMAS = {
+    "read": _fn("read", "Read a text file in the repo (8 KB cap).", {"path": {**_S, "description": "relative path"}},
+                ["path"]),
+    "grep": _fn("grep", "Regex search over the repo (50 hits max).",
+                {"pattern": {**_S, "description": "Python regex"},
+                 "path": {**_S, "description": "optional relative file or directory to scope the search"}},
+                ["pattern"]),
+    "edit": _fn("edit", "Apply one <<<REPLACE path/<<<WITH/<<<END or <<<FILE path/>>> block (format in the system prompt).",
+                {"text": {**_S, "description": "the full REPLACE or FILE block"}}, ["text"]),
+    "pytest": _fn("pytest", "Run `python -m pytest -q` in the repo.", {}, []),
+    "shell": _fn("shell", "Allowlisted command only: git status|diff, pytest, python -m pytest, python <file>.py.",
+                 {"cmd": _S}, ["cmd"]),
+}
+GREP_ALIASES = {"search", "find", "rg", "ripgrep", "grep_search", "search_files", "code_search", "search_code"}
+
+
+def openai_tools(tools: tuple[str, ...]) -> list[dict]:
+    """OpenAI/Groq `tools=` specs for the plan's tools, in fixed order. Only our five names; nothing invented."""
+    return [TOOL_SCHEMAS[t] for t in TOOL_SCHEMAS if t in tools]
+
+
+def native_action(name: str, arguments) -> tuple[str, str, Optional[str]]:
+    """Native tool call -> (kind, arg, error). Strips namespaces (repo_browser.grep -> grep), maps grep-like names
+    to grep; anything else -> error 'unknown tool'. For edit, arg is the REPLACE/FILE block text."""
+    base = re.split(r"[./]", (name or "").strip().lower())[-1]
+    kind = "grep" if base in GREP_ALIASES else base
+    if kind not in TOOL_SCHEMAS:
+        return name, "", f"unknown tool: {name}; use one of {', '.join(TOOL_SCHEMAS)}"
+    try:
+        a = arguments if isinstance(arguments, dict) else json.loads(arguments) if str(arguments).strip() else {}
+        if not isinstance(a, dict):
+            raise ValueError("arguments must be a JSON object")
+    except ValueError as e:
+        return kind, "", f"bad arguments for {kind}: {e}"
+    if kind == "grep":
+        pat, path = str(a.get("pattern") or a.get("query") or a.get("regex") or ""), str(a.get("path") or "")
+        return kind, pat + (f"\n{path}" if path else ""), None
+    if kind == "read":
+        return kind, str(a.get("path") or a.get("file") or ""), None
+    if kind == "shell":
+        return kind, str(a.get("cmd") or a.get("command") or ""), None
+    if kind == "edit":
+        return kind, str(a.get("text") or ""), None
+    return kind, "", None
+
+
+def recover_failed_generation(e: ProviderHTTPError) -> Optional[tuple[str, object]]:
+    """Groq 400 tool_use_failed carries the model's attempted call in error.failed_generation -> (name, args)."""
+    err = (e.data or {}).get("error") if isinstance(e.data, dict) else None
+    if not isinstance(err, dict) or err.get("code") != "tool_use_failed":
+        return None
+    try:
+        g = json.loads(err.get("failed_generation") or "")
+    except ValueError:
+        return None
+    if isinstance(g, list) and g:
+        g = g[0]
+    if not isinstance(g, dict) or not g.get("name"):
+        return None
+    return g["name"], g.get("arguments") or g.get("parameters") or {}
+
+
 @dataclass
 class LoopResult:
     tool_calls: list = field(default_factory=list)
@@ -174,12 +245,11 @@ def run_agent(prompt: str, repo: Path, plan: AgentPlan, providers: Callable, sys
         code, _ = tool_pytest(repo)
         baseline = {"cmd": PYTEST_CMD, "exit": code}
     messages = list(history or []) + [{"role": "user", "content": prompt}]
-    originals: dict = {}
-    last_edit = None
-    tests: list[dict] = []
-    failing_after_edit = 0
+    st = {"originals": {}, "last_edit": None, "tests": [], "failing_after_edit": 0}
+    fn_tools = openai_tools(plan.tools)
     nudged = False
     last_text = ""
+    recoveries = 0
     step = 0
     while step < plan.max_steps:
         step += 1
@@ -188,80 +258,118 @@ def run_agent(prompt: str, repo: Path, plan: AgentPlan, providers: Callable, sys
         except FileNotFoundError:
             res.stop_reason = "script ended"
             break
+        native = bool(fn_tools) and getattr(prov, "supports_tools", False)
         try:
-            c = prov.complete(plan.model_id, system, messages, budget)
+            c = (prov.complete(plan.model_id, system, messages, budget, tools=fn_tools) if native
+                 else prov.complete(plan.model_id, system, messages, budget))
         except ProviderHTTPError as e:
-            res.provider_error = {"step": step, "status": e.status, "body": e.body}
-            res.step_lines.append(f"[step {step}] provider error: HTTP {e.status}: {e.body}")
-            res.stop_reason = "provider error"
-            break
+            rec = recover_failed_generation(e) if recoveries < MAX_RECOVERIES else None
+            if rec is None:
+                res.provider_error = {"step": step, "status": e.status, "body": e.body}
+                res.step_lines.append(f"[step {step}] provider error: HTTP {e.status}: {e.body}")
+                res.stop_reason = "provider error"
+                break
+            # The model emitted a call the API rejected (e.g. invented repo_browser.grep). Run it via our
+            # mapping and continue in the text protocol (no tool_call_id exists for a rejected generation).
+            recoveries += 1
+            kind, arg, err = native_action(*rec)
+            messages.append({"role": "assistant", "content": f"TOOL {kind} {arg}".strip()})
+            result = _execute(repo, plan, step, kind, arg, arg, err, "recovered", st, res)
+            messages.append({"role": "user", "content": redact(result)[:RESULT_CAP]})
+            if st["failing_after_edit"] > REPAIR_CAP:
+                res.stop_reason = f"repair cap ({REPAIR_CAP}) exceeded"
+                break
+            continue
         res.calls.append(_call(f"agent_{step}", tier, c))
         last_text = c.text
-        messages.append({"role": "assistant", "content": c.text})
-        kind, arg = parse_action(c.text)
-        entry = {"step": step, "tool": kind, "arg": arg if kind not in ("done", "final") else "", "ok": True}
-        result = ""
-        if kind in ("done", "final"):
-            res.tool_calls.append(entry)
-            res.step_lines.append(f"[step {step}] {kind}")
-            post_edit_test = last_edit is not None and any(t["step"] > last_edit for t in tests)
-            if last_edit is not None and not post_edit_test and not nudged and step < plan.max_steps:
-                nudged = True
-                messages.append({"role": "user", "content": NUDGE})
-                res.step_lines.append("  verification gate: no test run after last edit -> nudge")
-                continue
-            res.final_text = arg
-            res.stop_reason = "done"
-            break
-        if kind != "edit" and kind not in plan.tools or kind == "edit" and "edit" not in plan.tools:
-            entry.update(ok=False, error=f"tool not allowed for this task: {kind}")
-            result = f"TOOL ERROR ({kind}): not allowed for this task; allowed: {', '.join(plan.tools)}"
+        if c.tool_calls:  # native function call(s): execute the first, answer every tool_call_id
+            first = c.tool_calls[0]
+            messages.append({"role": "assistant", "content": c.text or None, "tool_calls": [
+                {"id": t["id"], "type": "function", "function": {"name": t["name"], "arguments": t["arguments"]}}
+                for t in c.tool_calls]})
+            kind, arg, err = native_action(first["name"], first["arguments"])
+            result = _execute(repo, plan, step, kind, arg, arg, err, "native", st, res)
+            messages.append({"role": "tool", "tool_call_id": first["id"], "content": redact(result)[:RESULT_CAP]})
+            for t in c.tool_calls[1:]:
+                messages.append({"role": "tool", "tool_call_id": t["id"],
+                                 "content": "TOOL ERROR: one action per message; not executed"})
         else:
-            try:
-                if kind == "read":
-                    result = f"TOOL RESULT (read {arg}):\n" + tool_read(repo, arg)
-                elif kind == "grep":
-                    result = f"TOOL RESULT (grep {arg}):\n" + tool_grep(repo, arg)
-                elif kind == "edit":
-                    edits = parse_edits(c.text, repo)
-                    _snapshot(repo, edits, originals)
-                    apply_edits(repo, edits)
-                    last_edit = step
-                    entry["arg"] = ", ".join(e for e, _ in edits)
-                    result = f"TOOL RESULT (edit): wrote {entry['arg'] or 'nothing'}"
-                else:  # shell / pytest
-                    if kind == "pytest":
-                        cmd, (code, out) = PYTEST_CMD, tool_pytest(repo)
-                        entry["arg"] = cmd
-                    else:
-                        import shlex
-                        cmd = arg
-                        code, out = tool_shell(repo, arg)
-                        if not is_test_command(shlex.split(arg)):
-                            cmd = None
-                    entry["exit"] = code
-                    result = f"TOOL RESULT ({kind}): exit {code}\n{out}"
-                    if cmd is not None:
-                        tests.append({"step": step, "cmd": cmd, "exit": code, "passed": _passed(out)})
-                        if last_edit is not None and code != 0:
-                            failing_after_edit += 1
-            except (ToolError, UnsafeEdit) as e:
-                entry.update(ok=False, error=str(e))
-                result = f"TOOL ERROR ({kind}): {e}"
-        res.tool_calls.append(entry)
-        status = (f"ERROR: {entry['error']}" if not entry["ok"]
-                  else f"exit {entry['exit']}" if "exit" in entry else "ok")
-        res.step_lines.append(f"[step {step}] {kind} {entry['arg']} -> {status}".replace("  ", " "))
-        messages.append({"role": "user", "content": redact(result)[:RESULT_CAP]})
-        if failing_after_edit > REPAIR_CAP:
+            messages.append({"role": "assistant", "content": c.text})
+            kind, arg = parse_action(c.text)
+            if kind in ("done", "final"):
+                res.tool_calls.append({"step": step, "tool": kind, "arg": "", "ok": True, "via": "text"})
+                res.step_lines.append(f"[step {step}] {kind}")
+                post_edit_test = st["last_edit"] is not None and any(t["step"] > st["last_edit"] for t in st["tests"])
+                if st["last_edit"] is not None and not post_edit_test and not nudged and step < plan.max_steps:
+                    nudged = True
+                    messages.append({"role": "user", "content": NUDGE})
+                    res.step_lines.append("  verification gate: no test run after last edit -> nudge")
+                    continue
+                res.final_text = arg
+                res.stop_reason = "done"
+                break
+            result = _execute(repo, plan, step, kind, arg, c.text, None, "text", st, res)
+            messages.append({"role": "user", "content": redact(result)[:RESULT_CAP]})
+        if st["failing_after_edit"] > REPAIR_CAP:
             res.stop_reason = f"repair cap ({REPAIR_CAP}) exceeded"
             break
     else:
         res.stop_reason = "max_steps"
     if not res.final_text:
         res.final_text = re.sub(r"<<<.*?(>>>|<<<END)", "", last_text, flags=re.DOTALL).strip() or "(no final text)"
-    res.verification = verify(repo, originals, last_edit, tests, plan.harness, baseline, res.stop_reason, nudged)
+    res.verification = verify(repo, st["originals"], st["last_edit"], st["tests"], plan.harness, baseline,
+                              res.stop_reason, nudged)
     return res
+
+
+def _execute(repo: Path, plan: AgentPlan, step: int, kind: str, arg: str, edit_text: str, err: Optional[str],
+             via: str, st: dict, res: LoopResult) -> str:
+    """Run one action (text, native or recovered) through the same tools and bookkeeping. Returns the tool result."""
+    entry = {"step": step, "tool": kind, "arg": arg, "ok": True, "via": via}
+    result = ""
+    if err:
+        entry.update(ok=False, error=err)
+        result = f"TOOL ERROR ({kind}): {err}"
+    elif kind not in plan.tools:
+        entry.update(ok=False, error=f"tool not allowed for this task: {kind}")
+        result = f"TOOL ERROR ({kind}): not allowed for this task; allowed: {', '.join(plan.tools)}"
+    else:
+        try:
+            if kind == "read":
+                result = f"TOOL RESULT (read {arg}):\n" + tool_read(repo, arg)
+            elif kind == "grep":
+                result = f"TOOL RESULT (grep {arg}):\n" + tool_grep(repo, arg)
+            elif kind == "edit":
+                edits = parse_edits(edit_text, repo)
+                _snapshot(repo, edits, st["originals"])
+                apply_edits(repo, edits)
+                st["last_edit"] = step
+                entry["arg"] = ", ".join(e for e, _ in edits)
+                result = f"TOOL RESULT (edit): wrote {entry['arg'] or 'nothing'}"
+            else:  # shell / pytest
+                if kind == "pytest":
+                    cmd, (code, out) = PYTEST_CMD, tool_pytest(repo)
+                    entry["arg"] = cmd
+                else:
+                    cmd = arg
+                    code, out = tool_shell(repo, arg)
+                    if not is_test_command(shlex.split(arg)):
+                        cmd = None
+                entry["exit"] = code
+                result = f"TOOL RESULT ({kind}): exit {code}\n{out}"
+                if cmd is not None:
+                    st["tests"].append({"step": step, "cmd": cmd, "exit": code, "passed": _passed(out)})
+                    if st["last_edit"] is not None and code != 0:
+                        st["failing_after_edit"] += 1
+        except (ToolError, UnsafeEdit, ValueError) as e:
+            entry.update(ok=False, error=str(e))
+            result = f"TOOL ERROR ({kind}): {e}"
+    res.tool_calls.append(entry)
+    status = (f"ERROR: {entry['error']}" if not entry["ok"]
+              else f"exit {entry['exit']}" if "exit" in entry else "ok")
+    tag = "" if via == "text" else f" ({via})"
+    res.step_lines.append(f"[step {step}] {kind}{tag} {entry['arg']} -> {status}".replace("  ", " "))
+    return result
 
 
 def verify(repo: Path, originals: dict, last_edit: Optional[int], tests: list, harness: bool,
